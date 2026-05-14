@@ -750,6 +750,31 @@ const graph = ForceGraph()(graphContainer)
       ctx.fill();
     }
 
+    // Inner pulse: heartbeat core at exact center (tum — tum — pause)
+    var pulsePhase = (nodeIndex || 0) * 0.7;
+    var t = ((Date.now() / 1000) + pulsePhase) % 2.0; // 2s full cycle (slower)
+    var beat;
+    if (t < 0.15) {
+      beat = Math.sin(t / 0.15 * Math.PI); // first beat
+    } else if (t < 0.4) {
+      beat = 0; // gap between beats
+    } else if (t < 0.55) {
+      beat = Math.sin((t - 0.4) / 0.15 * Math.PI) * 0.6; // second beat (softer)
+    } else {
+      beat = 0; // long rest
+    }
+    var coreSize = size * 0.15;
+    var coreAlpha = 0.1 + beat * 0.45;
+    ctx.save();
+    ctx.globalAlpha = coreAlpha;
+    ctx.shadowBlur = coreSize * 5;
+    ctx.shadowColor = 'rgba(255, 255, 255, 0.7)';
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, coreSize, 0, 2 * Math.PI);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.fill();
+    ctx.restore();
+
     ctx.restore();
 
     // Pin indicator: subtle ring around pinned (fixed) nodes
@@ -762,25 +787,6 @@ const graph = ForceGraph()(graphContainer)
       ctx.arc(node.x, node.y, size + 3, 0, 2 * Math.PI);
       ctx.stroke();
       ctx.restore();
-    }
-
-    // New badge: small cyan dot for nodes created in last 7 days
-    if (node.metadata && node.metadata.birthtime) {
-      var ageMs = Date.now() - node.metadata.birthtime;
-      var sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
-      if (ageMs < sevenDaysMs) {
-        // Pulsing cyan dot at top-right of node
-        var badgeX = node.x + size * 0.7;
-        var badgeY = node.y - size * 0.7;
-        var badgePulse = 0.7 + 0.3 * Math.sin(Date.now() / 500);
-        ctx.save();
-        ctx.globalAlpha = badgePulse;
-        ctx.beginPath();
-        ctx.arc(badgeX, badgeY, 2.5, 0, 2 * Math.PI);
-        ctx.fillStyle = '#00E5FF';
-        ctx.fill();
-        ctx.restore();
-      }
     }
 
     // Activity heatmap: override color if active
@@ -798,20 +804,6 @@ const graph = ForceGraph()(graphContainer)
       ctx.textAlign = 'left';
       ctx.fillText('\u26A0', node.x + size + 2, node.y - size);
       ctx.restore();
-    }
-
-    // Dependency depth badge
-    if (typeof getDependencyBadge === 'function' && node.metadata) {
-      var badge = getDependencyBadge(node.metadata.eccentricity);
-      if (badge) {
-        ctx.save();
-        ctx.globalAlpha = 0.7;
-        ctx.fillStyle = badge.color;
-        ctx.font = 'bold ' + (7 / globalScale) + 'px sans-serif';
-        ctx.textAlign = 'right';
-        ctx.fillText(badge.text, node.x - size - 2, node.y + 3);
-        ctx.restore();
-      }
     }
 
     // Snapshot compare: green glow for new nodes
@@ -1460,4 +1452,246 @@ vscode.postMessage({ type: 'ready' });
   });
 
   document.body.appendChild(toolbar);
+})();
+
+// ─── 3D Mode Integration ─────────────────────────────────────────────────────
+(function() {
+  'use strict';
+
+  var is3DActive = false;
+  var graph3DInstance = null;
+  var container3D = null;
+
+  // Create 3D container (hidden by default)
+  container3D = document.createElement('div');
+  container3D.id = 'graph-3d';
+  container3D.style.cssText = 'width:100%;height:100%;position:absolute;top:0;left:0;display:none;';
+  document.body.appendChild(container3D);
+
+  // Add 3D toggle button to advanced toolbar
+  var advToolbar = document.getElementById('advanced-toolbar');
+  if (advToolbar) {
+    addToggleButton(advToolbar);
+  } else {
+    var obs = new MutationObserver(function(mutations, observer) {
+      var tb = document.getElementById('advanced-toolbar');
+      if (tb) {
+        addToggleButton(tb);
+        observer.disconnect();
+      }
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+  }
+
+  function addToggleButton(toolbar) {
+    var btn = document.createElement('button');
+    btn.id = 'toggle-3d';
+    btn.textContent = '3D';
+    btn.style.cssText = 'background:#2a2a2a;color:#888;border:1px solid #444;border-radius:3px;font-size:8px;padding:2px 6px;cursor:pointer;';
+    btn.title = 'Toggle 3D Mode';
+    btn.addEventListener('click', function() {
+      if (is3DActive) {
+        disable3D();
+        btn.style.background = '#2a2a2a';
+        btn.style.color = '#888';
+        btn.style.borderColor = '#444';
+      } else {
+        enable3D();
+        btn.style.background = 'rgba(74,158,255,0.9)';
+        btn.style.color = '#fff';
+        btn.style.borderColor = '#4A9EFF';
+      }
+    });
+    toolbar.appendChild(btn);
+
+    // Restore 3D state if persisted
+    var state = vscode.getState();
+    if (state && state.renderMode === '3d') {
+      enable3D();
+      btn.style.background = 'rgba(74,158,255,0.9)';
+      btn.style.color = '#fff';
+      btn.style.borderColor = '#4A9EFF';
+    }
+  }
+
+  function enable3D() {
+    // Load 3D lib if not loaded
+    var scriptSrc = document.body.getAttribute('data-3d-graph-uri');
+    if (!scriptSrc) { return; }
+
+    if (typeof ForceGraph3D === 'undefined') {
+      var script = document.createElement('script');
+      var nonce = document.body.getAttribute('data-nonce') || '';
+      if (nonce) { script.setAttribute('nonce', nonce); }
+      script.src = scriptSrc;
+      script.onload = function() {
+        activate3D();
+      };
+      script.onerror = function() {
+        // Fallback: stay in 2D
+        if (typeof vscode !== 'undefined') {
+          // Could show warning but keep silent
+        }
+      };
+      document.head.appendChild(script);
+    } else {
+      activate3D();
+    }
+  }
+
+  function activate3D() {
+    is3DActive = true;
+
+    // Hide 2D graph
+    var graph2D = document.getElementById('graph');
+    if (graph2D) { graph2D.style.display = 'none'; }
+
+    // Show 3D container
+    container3D.style.display = 'block';
+
+    // Create 3D instance
+    try {
+      graph3DInstance = ForceGraph3D({
+        controlType: 'orbit'
+      })(container3D)
+        .width(container3D.clientWidth)
+        .height(container3D.clientHeight)
+        .backgroundColor('#0d0d0d')
+        .showNavInfo(false)
+        .cooldownTime(Infinity)
+        .d3AlphaDecay(0.005)
+        .d3VelocityDecay(0.4)
+        .nodeRelSize(5)
+        .nodeResolution(64)
+        .nodeOpacity(1)
+        .nodeVal(function(node) {
+          return getNodeSize(node) * 3;
+        })
+        .nodeColor(function(node) {
+          return COLOR_MAP[node.type] || COLOR_MAP['unknown'];
+        })
+        .nodeLabel(function(node) {
+          return node.label + ' (' + (node.type || 'unknown') + ')';
+        })
+        .enableNodeDrag(true)
+        .onNodeDragEnd(function(node) {
+          // Fix node position after drag so it stays where you put it
+          node.fx = node.x;
+          node.fy = node.y;
+          node.fz = node.z;
+        })
+        .linkColor(function() { return 'rgba(74, 158, 255, 0.6)'; })
+        .linkOpacity(0.8)
+        .linkWidth(function(link) {
+          var w = link.weight || 1;
+          return Math.min(1 + Math.log2(w), 4);
+        })
+        .linkResolution(12)
+        .linkDirectionalParticles(3)
+        .linkDirectionalParticleWidth(2)
+        .linkDirectionalParticleSpeed(0.004)
+        .linkDirectionalParticleResolution(16)
+        .linkDirectionalParticleColor(function() { return 'rgba(74, 158, 255, 0.9)'; })
+        .onNodeClick(function(node) {
+          if (node && node.filePath) {
+            vscode.postMessage({ type: 'openFile', filePath: node.filePath });
+          }
+        });
+
+      // High quality renderer
+      var renderer = graph3DInstance.renderer();
+      if (renderer) {
+        renderer.setPixelRatio(window.devicePixelRatio || 2);
+      }
+
+      // Apply current graph data
+      if (typeof graphData !== 'undefined' && graphData) {
+        graph3DInstance.graphData(graphData);
+      }
+
+      // Central pulse effect — a glowing orb that breathes at the center
+      (function addCentralPulse() {
+        var scene = graph3DInstance.scene();
+        if (!scene) { return; }
+        var THREE = window.THREE || (graph3DInstance.renderer() && graph3DInstance.renderer().constructor && graph3DInstance.renderer().__proto__);
+
+        // Access THREE from the 3d-force-graph internals
+        try {
+          // Create inner core sphere
+          var coreGeo = new graph3DInstance.scene().constructor.prototype.constructor.length ? null : null;
+        } catch(e) {}
+
+        // Use the graph's tick to animate a CSS-based pulse instead (more reliable)
+        var pulseEl = document.createElement('div');
+        pulseEl.id = 'pulse-core-3d';
+        pulseEl.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:20px;height:20px;border-radius:50%;pointer-events:none;z-index:1;';
+        container3D.appendChild(pulseEl);
+
+        // Animate with CSS
+        var style = document.createElement('style');
+        style.textContent = '@keyframes corePulse3D{0%{box-shadow:0 0 15px 5px rgba(74,158,255,0.3),0 0 30px 10px rgba(74,158,255,0.15),inset 0 0 10px rgba(74,158,255,0.4);transform:translate(-50%,-50%) scale(1);}50%{box-shadow:0 0 25px 10px rgba(74,158,255,0.5),0 0 50px 20px rgba(74,158,255,0.25),inset 0 0 15px rgba(74,158,255,0.6);transform:translate(-50%,-50%) scale(1.4);}100%{box-shadow:0 0 15px 5px rgba(74,158,255,0.3),0 0 30px 10px rgba(74,158,255,0.15),inset 0 0 10px rgba(74,158,255,0.4);transform:translate(-50%,-50%) scale(1);}}#pulse-core-3d{background:radial-gradient(circle,rgba(74,158,255,0.6) 0%,rgba(74,158,255,0.1) 60%,transparent 100%);animation:corePulse3D 3s ease-in-out infinite;}';
+        document.head.appendChild(style);
+      })();
+
+      // Persist mode
+      var state = vscode.getState() || {};
+      state.renderMode = '3d';
+      vscode.setState(state);
+    } catch (e) {
+      // WebGL failure — fallback to 2D
+      disable3D();
+    }
+  }
+
+  function disable3D() {
+    is3DActive = false;
+
+    // Destroy 3D instance
+    if (graph3DInstance) {
+      try {
+        var renderer = graph3DInstance.renderer();
+        if (renderer) { renderer.dispose(); }
+        var scene = graph3DInstance.scene();
+        if (scene) {
+          scene.traverse(function(obj) {
+            if (obj.geometry) { obj.geometry.dispose(); }
+            if (obj.material) {
+              if (Array.isArray(obj.material)) {
+                obj.material.forEach(function(m) { m.dispose(); });
+              } else {
+                obj.material.dispose();
+              }
+            }
+          });
+        }
+      } catch (e) { /* graceful */ }
+      graph3DInstance = null;
+    }
+    container3D.innerHTML = '';
+    container3D.style.display = 'none';
+
+    // Remove pulse style
+    var pulseStyle = document.querySelector('style[data-pulse-3d]');
+    if (pulseStyle) { pulseStyle.remove(); }
+
+    // Show 2D graph
+    var graph2D = document.getElementById('graph');
+    if (graph2D) { graph2D.style.display = 'block'; }
+
+    // Persist mode
+    var state = vscode.getState() || {};
+    state.renderMode = '2d';
+    vscode.setState(state);
+  }
+
+  // Listen for graph data updates to keep 3D in sync
+  var originalMessageHandler = window.addEventListener;
+  window.addEventListener('message', function(event) {
+    if (is3DActive && graph3DInstance && event.data && event.data.type === 'updateGraph') {
+      var data = event.data.data;
+      if (data && data.nodes && data.edges) {
+        graph3DInstance.graphData({ nodes: data.nodes, links: data.edges });
+      }
+    }
+  });
 })();

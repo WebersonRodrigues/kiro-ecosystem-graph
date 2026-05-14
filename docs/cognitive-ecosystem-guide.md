@@ -1,5 +1,27 @@
 # Complete Guide: How to Build an AI Cognitive Ecosystem for Any Project
 
+> This guide is designed for [Kiro IDE](https://kiro.dev) users building cognitive ecosystems with steerings, skills, and hooks. The concepts apply to any AI-assisted development environment, but the tooling and examples are Kiro-native.
+
+---
+
+## The 3 Core Truths
+
+Before diving into layers and architecture, internalize these three principles. Everything in this guide exists to serve them:
+
+### 1. Files are the new software
+
+Your `.md` files are not documentation — they are the application itself. Each steering file becomes an instruction that the AI transforms into behavior, code, and decisions. The asset is no longer compiled code — the asset is the prompt. Treat your steerings with the same rigor you treat production code.
+
+### 2. Guard the context window
+
+After 60% context window token usage, AI quality degrades significantly. The agent starts losing precision, forgetting rules, and producing generic responses. Organize your cognitive memory BEFORE it compacts. Keep individual steerings between 100-350 lines. Use `inclusion: auto` and `fileMatch` aggressively — only load what's needed for the current moment.
+
+### 3. Every agent = Instruction + Access
+
+When building any AI agent or ecosystem, obsess over two things: **instruction** (how precise and specific your directions are) and **access** (the tools and data sources available). Every agent is a good instruction with correct access to the tools it needs. The more precise and specific you are on these two dimensions, the more assertive and performant your agent will be.
+
+---
+
 ## What it is and why build one
 
 An AI cognitive ecosystem is a living documentation system that transforms any AI model connected to your workspace into a project specialist. It's not a static set of rules — it's an organism that learns from each session, accumulates verified knowledge, and refines itself over time.

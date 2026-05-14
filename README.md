@@ -2,6 +2,8 @@
 
 **See your AI's brain. Fix what's broken.**
 
+Built for [Kiro IDE](https://kiro.dev). Also compatible with VS Code.
+
 ![Graph Overview](https://raw.githubusercontent.com/WebersonRodrigues/kiro-ecosystem-graph/main/resources/screenshots-graph-overview.png)
 
 > Interactive force-directed graph that visualizes your Kiro cognitive ecosystem — steerings, skills, hooks, and their interconnections rendered as a neural network brain map.
