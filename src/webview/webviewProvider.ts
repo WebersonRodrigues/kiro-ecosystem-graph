@@ -297,13 +297,15 @@ export class EcosystemGraphProvider implements vscode.WebviewViewProvider {
     const cognitivePanelUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'cognitive-panel.js'));
     const shapeLegendUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'shape-legend.js'));
     const forceGraphUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'force-graph.min.js'));
+    const rendererManagerUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'renderer-manager.js'));
+    const forceGraph3DUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, '3d-force-graph.min.js'));
 
     return /* html */ `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}' ${webview.cspSource}; style-src 'unsafe-inline' ${webview.cspSource};">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}' ${webview.cspSource}; style-src 'unsafe-inline' ${webview.cspSource}; img-src ${webview.cspSource} blob: data:;">
   <title>Ecosystem Graph</title>
   <style>
     /* ── Reset & Base ─────────────────────────────────────────────── */
@@ -338,6 +340,48 @@ export class EcosystemGraphProvider implements vscode.WebviewViewProvider {
       pointer-events: none;
       z-index: 2;
       background: radial-gradient(ellipse at center, rgba(26, 58, 92, 0.18) 0%, rgba(13, 13, 13, 0) 65%);
+    }
+
+    /* ── Central Pulse Orb ────────────────────────────────────────── */
+    #pulse-core-2d {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 3;
+      background: radial-gradient(circle, rgba(74,158,255,0.6) 0%, rgba(74,158,255,0.1) 60%, transparent 100%);
+      animation: corePulse2D 3s ease-in-out infinite;
+    }
+
+    @keyframes corePulse2D {
+      0% { box-shadow: 0 0 15px 5px rgba(74,158,255,0.3), 0 0 30px 10px rgba(74,158,255,0.15), inset 0 0 10px rgba(74,158,255,0.4); transform: translate(-50%,-50%) scale(1); }
+      50% { box-shadow: 0 0 25px 10px rgba(74,158,255,0.5), 0 0 50px 20px rgba(74,158,255,0.25), inset 0 0 15px rgba(74,158,255,0.6); transform: translate(-50%,-50%) scale(1.4); }
+      100% { box-shadow: 0 0 15px 5px rgba(74,158,255,0.3), 0 0 30px 10px rgba(74,158,255,0.15), inset 0 0 10px rgba(74,158,255,0.4); transform: translate(-50%,-50%) scale(1); }
+    }
+
+    /* ── Central Heartbeat Pulse ──────────────────────────────────── */
+    @keyframes corePulse {
+      0% {
+        box-shadow: 0 0 15px 5px rgba(74,158,255,0.3), 0 0 30px 10px rgba(74,158,255,0.15), inset 0 0 10px rgba(74,158,255,0.4);
+        transform: translate(-50%,-50%) scale(1);
+      }
+      50% {
+        box-shadow: 0 0 25px 10px rgba(74,158,255,0.5), 0 0 50px 20px rgba(74,158,255,0.25), inset 0 0 15px rgba(74,158,255,0.6);
+        transform: translate(-50%,-50%) scale(1.4);
+      }
+      100% {
+        box-shadow: 0 0 15px 5px rgba(74,158,255,0.3), 0 0 30px 10px rgba(74,158,255,0.15), inset 0 0 10px rgba(74,158,255,0.4);
+        transform: translate(-50%,-50%) scale(1);
+      }
+    }
+
+    #pulse-core {
+      background: radial-gradient(circle, rgba(74,158,255,0.6) 0%, rgba(74,158,255,0.1) 60%, transparent 100%);
+      animation: corePulse 3s ease-in-out infinite;
     }
 
     /* ── Empty State Message ──────────────────────────────────────── */
@@ -643,7 +687,7 @@ export class EcosystemGraphProvider implements vscode.WebviewViewProvider {
     }
   </style>
 </head>
-<body>
+<body data-3d-graph-uri="${forceGraph3DUri}" data-nonce="${nonce}">
   <!-- Controls: search input and filter toggles (wired in task 10.1) -->
   <div id="controls">
     <input type="text" id="search-input" placeholder="Search nodes..." />
@@ -655,8 +699,14 @@ export class EcosystemGraphProvider implements vscode.WebviewViewProvider {
   <!-- Graph canvas container -->
   <div id="graph"></div>
 
+  <!-- Central heartbeat pulse (shared between 2D and 3D) -->
+  <div id="pulse-core" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:20px;height:20px;border-radius:50%;pointer-events:none;z-index:1;"></div>
+
   <!-- Radial glow overlay (stays centered regardless of zoom/pan) -->
   <div id="radial-glow"></div>
+
+  <!-- Central pulse orb (heartbeat of the ecosystem) -->
+  <div id="pulse-core-2d"></div>
 
   <!-- Empty state message -->
   <div id="empty-message">No ecosystem data found.<br>Add steering files to .kiro/steering/ to get started.</div>
@@ -684,6 +734,7 @@ export class EcosystemGraphProvider implements vscode.WebviewViewProvider {
 
   <!-- Scripts -->
   <script nonce="${nonce}" src="${forceGraphUri}"></script>
+  <script nonce="${nonce}" src="${rendererManagerUri}"></script>
   <script nonce="${nonce}" src="${scriptUri}"></script>
   <script nonce="${nonce}" src="${filterPanelUri}"></script>
   <script nonce="${nonce}" src="${healthPanelUri}"></script>

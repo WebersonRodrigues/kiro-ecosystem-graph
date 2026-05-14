@@ -1,7 +1,7 @@
 {
   "name": "kiro-ecosystem-graph",
   "displayName": "Kiro Ecosystem Graph",
-  "description": "Interactive force-directed graph visualization of your Kiro cognitive ecosystem — steerings, skills, hooks, and their interconnections rendered as a neural network brain map.",
+  "description": "Interactive force-directed graph visualization of your Kiro cognitive ecosystem — steerings, skills, hooks, and their interconnections rendered as a neural network brain map. Built for Kiro IDE, also compatible with VS Code.",
   "version": "0.1.5",
   "publisher": "webersonrodrigues",
   "license": "MIT",
@@ -73,6 +73,7 @@
     "test": "mocha --require ts-node/register 'src/test/**/*.test.ts' 'src/test/**/*.property.ts'"
   },
   "dependencies": {
+    "3d-force-graph": "^1.73.4",
     "force-graph": "^1.43.0"
   },
   "devDependencies": {

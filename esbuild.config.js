@@ -25,7 +25,7 @@ function copyWebviewFiles() {
     fs.mkdirSync(distDir, { recursive: true });
   }
 
-  const filesToCopy = ['webview.js', 'settings-panel.js', 'filter-panel.js', 'health-panel.js', 'interactions-panel.js', 'gap-detector.js', 'alternative-views.js', 'visual-modes.js', 'export-panel.js', 'cognitive-panel.js', 'shape-legend.js'];
+  const filesToCopy = ['webview.js', 'settings-panel.js', 'filter-panel.js', 'health-panel.js', 'interactions-panel.js', 'gap-detector.js', 'alternative-views.js', 'visual-modes.js', 'export-panel.js', 'cognitive-panel.js', 'shape-legend.js', 'renderer-manager.js'];
 
   for (const file of filesToCopy) {
     const src = path.join(mediaDir, file);
@@ -40,6 +40,13 @@ function copyWebviewFiles() {
   const forceGraphDest = path.join(distDir, 'force-graph.min.js');
   if (fs.existsSync(forceGraphSrc)) {
     fs.copyFileSync(forceGraphSrc, forceGraphDest);
+  }
+
+  // Copy 3d-force-graph vendor lib to dist/
+  const forceGraph3DSrc = path.join(__dirname, 'node_modules', '3d-force-graph', 'dist', '3d-force-graph.min.js');
+  const forceGraph3DDest = path.join(distDir, '3d-force-graph.min.js');
+  if (fs.existsSync(forceGraph3DSrc)) {
+    fs.copyFileSync(forceGraph3DSrc, forceGraph3DDest);
   }
 }
 
