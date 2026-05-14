@@ -2,7 +2,7 @@
   "name": "kiro-ecosystem-graph",
   "displayName": "Kiro Ecosystem Graph",
   "description": "Interactive force-directed graph visualization of your Kiro cognitive ecosystem — steerings, skills, hooks, and their interconnections rendered as a neural network brain map.",
-  "version": "0.1.2",
+  "version": "0.1.5",
   "publisher": "webersonrodrigues",
   "license": "MIT",
   "icon": "resources/icon.png",

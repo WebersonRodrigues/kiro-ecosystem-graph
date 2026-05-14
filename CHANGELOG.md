@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.5 (2026-05-14)
+
+### Features
+
+- **Export Cognitive Analysis** — New "Export" button in the Cognitive Analysis panel generates a structured Markdown report with all findings, tips per item, and "Instructions for Kiro AI" section ready to paste into chat
+- **3 new analysis categories:**
+  - Weak Instructions — steerings with fewer than 10 lines (too short to be effective prompts)
+  - Context Window Overload — always-loaded steerings exceeding 350 lines + total context budget tracking
+  - Instruction ↔ Access Gap — hooks without steering references and steerings without hook triggers
+- **Cognitive Ecosystem Guide** — Complete English guide (`docs/cognitive-ecosystem-guide.md`) covering the 9 layers, hook patterns, skills, and step-by-step setup from scratch
+- Guide linked in README for marketplace visibility
+
+### Fixes
+
+- Fixed extension not loading on other machines — all webview scripts and force-graph now served from `dist/` instead of `src/` (which was excluded from .vsix by `.vscodeignore`)
+- Removed `StatsHistoryService` — no longer generates `ecosystem-graph-stats.json` in the workspace
+- Cleaned `.vscodeignore` to exclude `.kiro/**` and `*.vsix` from package
+
+## 0.1.3 (2026-05-14)
+
+### Improvements
+
+- Internal build improvements
+
 ## 0.1.2 (2026-05-14)
 
 ### Improvements

@@ -236,6 +236,37 @@ export interface GraphSettings {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Cognitive Analysis Export
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Result of the cognitive analysis computation from the webview panel.
+ * Sent to the extension host for Markdown report generation.
+ */
+export interface CognitiveAnalysisResult {
+  /** Steering nodes with 0 incoming + 0 outgoing edges */
+  steeringsSoltos: { id: string; label: string }[];
+  /** Edges with weight=1 AND type='backtick-ref' */
+  vinculosFrageis: { source: string; target: string; sourceLabel: string; targetLabel: string }[];
+  /** Nodes with 0 total edges */
+  arquivosSemContexto: { id: string; label: string; type: string }[];
+  /** Workspace folders with 0 steering files */
+  coverageGaps: { folder: string }[];
+  /** Steering files with fewer than 10 lines (weak instructions) */
+  weakInstructions: { id: string; label: string; lineCount: number }[];
+  /** Always-loaded steerings with 100+ lines (context window risk) */
+  contextOverload: { id: string; label: string; lineCount: number }[];
+  /** Total lines of all always-loaded steerings */
+  totalAlwaysLines: number;
+  /** Hooks with no reference to any steering (access without instruction) */
+  hooksWithoutInstruction: { id: string; label: string }[];
+  /** Non-always steerings not referenced by any hook (instruction without access) */
+  steeringsWithoutAccess: { id: string; label: string; inclusion: string }[];
+  /** Actionable recommendations */
+  sugestoes: string[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Extension <-> Webview Communication
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -261,7 +292,8 @@ export type WebviewMessage =
   | { type: 'saveSnapshot' }
   | { type: 'loadSnapshot'; filename: string }
   | { type: 'exportImage'; dataUrl: string }
-  | { type: 'exportImageError'; error: string };
+  | { type: 'exportImageError'; error: string }
+  | { type: 'exportCognitiveAnalysis'; data: CognitiveAnalysisResult | null };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Stats History (Temporal Evolution)

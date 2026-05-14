@@ -16,7 +16,7 @@ const extensionBuildOptions = {
   sourcemap: true,
 };
 
-// Copy webview JS files to dist/
+// Copy webview JS files and vendor libs to dist/
 function copyWebviewFiles() {
   const mediaDir = path.join(__dirname, 'src', 'webview', 'media');
   const distDir = path.join(__dirname, 'dist');
@@ -33,6 +33,13 @@ function copyWebviewFiles() {
     if (fs.existsSync(src)) {
       fs.copyFileSync(src, dest);
     }
+  }
+
+  // Copy force-graph vendor lib to dist/
+  const forceGraphSrc = path.join(__dirname, 'node_modules', 'force-graph', 'dist', 'force-graph.min.js');
+  const forceGraphDest = path.join(distDir, 'force-graph.min.js');
+  if (fs.existsSync(forceGraphSrc)) {
+    fs.copyFileSync(forceGraphSrc, forceGraphDest);
   }
 }
 

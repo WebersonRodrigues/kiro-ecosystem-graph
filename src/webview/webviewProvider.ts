@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
-import { SerializedGraph, ExtensionMessage, WebviewMessage, DailySnapshot, AnnotationEntry } from '../types';
+import { SerializedGraph, ExtensionMessage, WebviewMessage, DailySnapshot, AnnotationEntry, CognitiveAnalysisResult } from '../types';
 import { GraphDataStore } from '../services/graphDataStore';
 import { PathResolver } from '../services/pathResolver';
 import { AnnotationService } from '../services/annotationService';
 import { SnapshotService } from '../services/snapshotService';
+import { generateCognitiveReport } from '../services/markdownReportGenerator';
 
 /**
  * Webview provider for the Ecosystem Graph panel.
@@ -38,9 +39,7 @@ export class EcosystemGraphProvider implements vscode.WebviewViewProvider {
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [
-        vscode.Uri.joinPath(this.extensionUri, 'src', 'webview', 'media'),
         vscode.Uri.joinPath(this.extensionUri, 'dist'),
-        vscode.Uri.joinPath(this.extensionUri, 'node_modules'),
       ],
     };
 
@@ -113,6 +112,9 @@ export class EcosystemGraphProvider implements vscode.WebviewViewProvider {
         break;
       case 'exportImageError':
         vscode.window.showWarningMessage('Failed to capture graph: ' + message.error);
+        break;
+      case 'exportCognitiveAnalysis':
+        this.handleExportCognitiveAnalysis(message.data);
         break;
     }
   }
@@ -187,6 +189,55 @@ export class EcosystemGraphProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * Handles exporting the cognitive analysis as a structured Markdown report.
+   * Shows a save dialog and writes the report to the selected location.
+   */
+  private async handleExportCognitiveAnalysis(data: CognitiveAnalysisResult | null): Promise<void> {
+    if (!data) {
+      return;
+    }
+
+    // Validate at least one non-empty array
+    const hasContent = data.steeringsSoltos.length > 0
+      || data.vinculosFrageis.length > 0
+      || data.arquivosSemContexto.length > 0
+      || data.coverageGaps.length > 0
+      || data.weakInstructions.length > 0
+      || data.contextOverload.length > 0
+      || data.hooksWithoutInstruction.length > 0
+      || data.steeringsWithoutAccess.length > 0;
+
+    if (!hasContent) {
+      return;
+    }
+
+    const markdownContent = generateCognitiveReport(data);
+    const defaultFilename = `cognitive-analysis-${new Date().toISOString().slice(0, 10)}.md`;
+
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    const defaultUri = workspaceFolder
+      ? vscode.Uri.joinPath(workspaceFolder.uri, defaultFilename)
+      : undefined;
+
+    const saveUri = await vscode.window.showSaveDialog({
+      defaultUri,
+      filters: { 'Markdown': ['md'] },
+    });
+
+    if (!saveUri) {
+      return;
+    }
+
+    try {
+      await vscode.workspace.fs.writeFile(saveUri, Buffer.from(markdownContent, 'utf-8'));
+      const savedFilename = saveUri.path.split('/').pop() || defaultFilename;
+      vscode.window.showInformationMessage(`Cognitive analysis exported to ${savedFilename}`);
+    } catch {
+      vscode.window.showWarningMessage('Failed to export cognitive analysis');
+    }
+  }
+
+  /**
    * Sends the current graph data to the webview.
    * Called when the webview signals it is ready.
    */
@@ -232,48 +283,20 @@ export class EcosystemGraphProvider implements vscode.WebviewViewProvider {
   private getHtmlForWebview(webview: vscode.Webview): string {
     const nonce = getNonce();
 
-    const scriptUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview.js')
-    );
+    const distUri = vscode.Uri.joinPath(this.extensionUri, 'dist');
 
-    const settingsPanelUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'src', 'webview', 'media', 'settings-panel.js')
-    );
-
-    const filterPanelUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'src', 'webview', 'media', 'filter-panel.js')
-    );
-
-    const healthPanelUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'src', 'webview', 'media', 'health-panel.js')
-    );
-
-    const interactionsPanelUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'src', 'webview', 'media', 'interactions-panel.js')
-    );
-
-    const gapDetectorUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'src', 'webview', 'media', 'gap-detector.js')
-    );
-    const alternativeViewsUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'src', 'webview', 'media', 'alternative-views.js')
-    );
-    const visualModesUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'src', 'webview', 'media', 'visual-modes.js')
-    );
-    const exportPanelUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'src', 'webview', 'media', 'export-panel.js')
-    );
-    const cognitivePanelUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'src', 'webview', 'media', 'cognitive-panel.js')
-    );
-    const shapeLegendUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'src', 'webview', 'media', 'shape-legend.js')
-    );
-
-    const forceGraphUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'node_modules', 'force-graph', 'dist', 'force-graph.min.js')
-    );
+    const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'webview.js'));
+    const settingsPanelUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'settings-panel.js'));
+    const filterPanelUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'filter-panel.js'));
+    const healthPanelUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'health-panel.js'));
+    const interactionsPanelUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'interactions-panel.js'));
+    const gapDetectorUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'gap-detector.js'));
+    const alternativeViewsUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'alternative-views.js'));
+    const visualModesUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'visual-modes.js'));
+    const exportPanelUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'export-panel.js'));
+    const cognitivePanelUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'cognitive-panel.js'));
+    const shapeLegendUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'shape-legend.js'));
+    const forceGraphUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'force-graph.min.js'));
 
     return /* html */ `<!DOCTYPE html>
 <html lang="en">
