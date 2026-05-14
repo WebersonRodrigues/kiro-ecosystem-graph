@@ -1332,6 +1332,11 @@ function reapplyFilters() {
   const filteredData = applyFilters(graphData);
   graph.graphData(filteredData);
 
+  // Also update 3D instance if active
+  if (window.is3DActive && window.graph3DInstance) {
+    window.graph3DInstance.graphData(filteredData);
+  }
+
   // Update health panel with filtered data
   if (typeof updateHealthPanel === 'function') {
     updateHealthPanel(filteredData, degreeMap);
@@ -1433,6 +1438,8 @@ vscode.postMessage({ type: 'ready' });
     btn.style.cssText = 'background:#2a2a2a;color:#888;border:1px solid #444;border-radius:3px;font-size:8px;padding:2px 6px;cursor:pointer;';
     btn.dataset.active = 'false';
     btn.addEventListener('click', function() {
+      // These visual modes only work in 2D canvas mode
+      if (window.is3DActive) { return; }
       var isActive = btn.dataset.active === 'true';
       if (isActive) {
         mode.onDisable();
@@ -1458,8 +1465,11 @@ vscode.postMessage({ type: 'ready' });
 (function() {
   'use strict';
 
-  var is3DActive = false;
-  var graph3DInstance = null;
+  // Exposed as globals for other panels (interactions-panel.js)
+  window.is3DActive = false;
+  window.graph3DInstance = null;
+  var is3DActive = window.is3DActive;
+  var graph3DInstance = window.graph3DInstance;
   var container3D = null;
 
   // Create 3D container (hidden by default)
@@ -1541,10 +1551,17 @@ vscode.postMessage({ type: 'ready' });
 
   function activate3D() {
     is3DActive = true;
+    window.is3DActive = true;
 
     // Hide 2D graph
     var graph2D = document.getElementById('graph');
     if (graph2D) { graph2D.style.display = 'none'; }
+
+    // Hide 2D-only toolbar buttons (Heatmap, Constellation, Synaptic)
+    ['toggle-heatmap', 'toggle-constellation', 'toggle-synaptic'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) { el.style.display = 'none'; }
+    });
 
     // Show 3D container
     container3D.style.display = 'block';
@@ -1609,6 +1626,9 @@ vscode.postMessage({ type: 'ready' });
         graph3DInstance.graphData(graphData);
       }
 
+      // Expose to other panels
+      window.graph3DInstance = graph3DInstance;
+
       // Central pulse effect — a glowing orb that breathes at the center
       (function addCentralPulse() {
         var scene = graph3DInstance.scene();
@@ -1645,6 +1665,8 @@ vscode.postMessage({ type: 'ready' });
 
   function disable3D() {
     is3DActive = false;
+    window.is3DActive = false;
+    window.graph3DInstance = null;
 
     // Destroy 3D instance
     if (graph3DInstance) {
@@ -1677,6 +1699,12 @@ vscode.postMessage({ type: 'ready' });
     // Show 2D graph
     var graph2D = document.getElementById('graph');
     if (graph2D) { graph2D.style.display = 'block'; }
+
+    // Show 2D-only toolbar buttons back
+    ['toggle-heatmap', 'toggle-constellation', 'toggle-synaptic'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) { el.style.display = ''; }
+    });
 
     // Persist mode
     var state = vscode.getState() || {};
