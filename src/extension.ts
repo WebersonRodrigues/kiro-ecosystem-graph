@@ -4,7 +4,6 @@ import { ParserService } from './services/parserService';
 import { NodeClassifier } from './services/nodeClassifier';
 import { GraphDataStore } from './services/graphDataStore';
 import { PathResolver } from './services/pathResolver';
-import { StatsHistoryService } from './services/statsHistoryService';
 import { AnnotationService } from './services/annotationService';
 import { SnapshotService } from './services/snapshotService';
 import { EcosystemGraphProvider } from './webview/webviewProvider';
@@ -21,7 +20,6 @@ export function activate(context: vscode.ExtensionContext): void {
   const parserService = new ParserService(nodeClassifier, pathResolver);
   const graphDataStore = new GraphDataStore(nodeClassifier);
   const fileDiscoveryService = new FileDiscoveryService();
-  const statsHistoryService = new StatsHistoryService(workspaceFolders[0].uri);
   const annotationService = new AnnotationService(workspaceFolders[0].uri);
   const snapshotService = new SnapshotService(workspaceFolders[0].uri);
 
@@ -43,11 +41,11 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   // Initial discovery and graph population
-  initializeGraph(fileDiscoveryService, parserService, graphDataStore, webviewProvider, statsHistoryService, annotationService, snapshotService);
+  initializeGraph(fileDiscoveryService, parserService, graphDataStore, webviewProvider, annotationService, snapshotService);
 
   // File watcher for incremental updates
   const fileWatcher = fileDiscoveryService.watchForChanges((event: FileChangeEvent) => {
-    handleFileChange(event, fileDiscoveryService, parserService, graphDataStore, webviewProvider, statsHistoryService, annotationService, snapshotService);
+    handleFileChange(event, fileDiscoveryService, parserService, graphDataStore, webviewProvider, annotationService, snapshotService);
   });
 
   context.subscriptions.push(viewRegistration, showCommand, fileWatcher);
@@ -103,7 +101,6 @@ async function initializeGraph(
   parserService: ParserService,
   graphDataStore: GraphDataStore,
   webviewProvider: EcosystemGraphProvider,
-  statsHistoryService: StatsHistoryService,
   annotationService: AnnotationService,
   snapshotService: SnapshotService
 ): Promise<void> {
@@ -164,20 +161,12 @@ async function initializeGraph(
     // Compute eccentricity for all nodes after graph is fully built
     computeEccentricities(graphDataStore);
 
-    // Record stats snapshot
-    await statsHistoryService.load();
-    await statsHistoryService.recordSnapshot(
-      graphDataStore.getNodes().length,
-      graphDataStore.getEdges().length
-    );
-
     // Load annotations and snapshot list
     await annotationService.load();
     const annotations = annotationService.getAll();
     const snapshotList = await snapshotService.list();
 
-    const statsHistory = statsHistoryService.getRecentSnapshots();
-    webviewProvider.updateGraph(graphDataStore.getSerializableGraph(), statsHistory, annotations, snapshotList);
+    webviewProvider.updateGraph(graphDataStore.getSerializableGraph(), undefined, annotations, snapshotList);
   } catch {
     // Discovery failure — graph starts empty
   }
@@ -189,7 +178,6 @@ async function handleFileChange(
   parserService: ParserService,
   graphDataStore: GraphDataStore,
   webviewProvider: EcosystemGraphProvider,
-  statsHistoryService: StatsHistoryService,
   annotationService: AnnotationService,
   snapshotService: SnapshotService
 ): Promise<void> {
@@ -251,17 +239,10 @@ async function handleFileChange(
   // Recompute eccentricity after graph change
   computeEccentricities(graphDataStore);
 
-  // Record stats snapshot after graph change
-  await statsHistoryService.recordSnapshot(
-    graphDataStore.getNodes().length,
-    graphDataStore.getEdges().length
-  );
-
   // Load annotations and snapshot list
   await annotationService.load();
   const annotations = annotationService.getAll();
   const snapshotList = await snapshotService.list();
 
-  const statsHistory = statsHistoryService.getRecentSnapshots();
-  webviewProvider.updateGraph(graphDataStore.getSerializableGraph(), statsHistory, annotations, snapshotList);
+  webviewProvider.updateGraph(graphDataStore.getSerializableGraph(), undefined, annotations, snapshotList);
 }

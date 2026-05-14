@@ -16,6 +16,9 @@
 var CognitivePanel = (function () {
   'use strict';
 
+  // Module-scoped variable to store latest analysis result for export
+  var latestAnalysis = null;
+
   // ─────────────────────────────────────────────────────────────────────────
   // Panel Creation (hidden by default, toggled via button)
   // ─────────────────────────────────────────────────────────────────────────
@@ -62,8 +65,50 @@ var CognitivePanel = (function () {
   panel.style.lineHeight = '1.5';
   panel.style.pointerEvents = 'auto';
   panel.style.display = 'none';
-  panel.innerHTML = '<div style="font-size:11px;font-weight:bold;color:#fff;margin-bottom:4px;">Cognitive Analysis</div><div id="cognitive-content">No data</div>';
+
+  // Build panel header with export button
+  var header = document.createElement('div');
+  header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;';
+
+  var title = document.createElement('span');
+  title.style.cssText = 'font-size:11px;font-weight:bold;color:#fff;';
+  title.textContent = 'Cognitive Analysis';
+
+  var exportBtn = document.createElement('button');
+  exportBtn.id = 'cognitive-export-btn';
+  exportBtn.title = 'Export as Markdown';
+  exportBtn.innerHTML = 'Export';
+  exportBtn.style.cssText = 'background:#2a2a2a;color:#ccc;border:1px solid #555;border-radius:3px;font-size:9px;padding:3px 6px;cursor:pointer;display:none;';
+
+  header.appendChild(title);
+  header.appendChild(exportBtn);
+
+  var contentDiv = document.createElement('div');
+  contentDiv.id = 'cognitive-content';
+  contentDiv.textContent = 'No data';
+
+  panel.appendChild(header);
+  panel.appendChild(contentDiv);
   document.body.appendChild(panel);
+
+  // Export button click handler — uses global vscode API from webview.js
+  exportBtn.addEventListener('click', function () {
+    if (latestAnalysis && typeof vscode !== 'undefined') {
+      vscode.postMessage({ type: 'exportCognitiveAnalysis', data: latestAnalysis });
+    }
+  });
+
+  // Hover effect for export button
+  exportBtn.addEventListener('mouseenter', function () {
+    exportBtn.style.background = '#3a3a3a';
+    exportBtn.style.color = '#fff';
+    exportBtn.style.borderColor = '#4A9EFF';
+  });
+  exportBtn.addEventListener('mouseleave', function () {
+    exportBtn.style.background = '#2a2a2a';
+    exportBtn.style.color = '#ccc';
+    exportBtn.style.borderColor = '#555';
+  });
 
   // Toggle behavior
   toggleBtn.addEventListener('click', function () {
@@ -160,7 +205,76 @@ var CognitivePanel = (function () {
       });
     }
 
-    // 5. Suggestions: actionable recommendations
+    // 5. Weak Instructions: steering files with very few lines (< 10 lines = weak prompt)
+    var weakInstructions = [];
+    data.nodes.forEach(function(n) {
+      if (n.type && n.type.indexOf('steering-') === 0) {
+        var lineCount = (n.metadata && n.metadata.lineCount) || 0;
+        if (lineCount > 0 && lineCount < 10) {
+          weakInstructions.push({ id: n.id, label: n.label, lineCount: lineCount });
+        }
+      }
+    });
+
+    // 6. Context Overload: always-included steerings that may overflow the context window
+    var contextOverload = [];
+    var totalAlwaysLines = 0;
+    data.nodes.forEach(function(n) {
+      if (n.type && n.type.indexOf('steering-') === 0) {
+        var inclusion = (n.metadata && n.metadata.inclusion) || 'always';
+        var lineCount = (n.metadata && n.metadata.lineCount) || 0;
+        if (inclusion === 'always' || inclusion === 'auto') {
+          totalAlwaysLines += lineCount;
+          if (lineCount > 350) {
+            contextOverload.push({ id: n.id, label: n.label, lineCount: lineCount });
+          }
+        }
+      }
+    });
+
+    // 7. Instruction-Access Gap: hooks without steering references (access without instruction)
+    //    and steerings not referenced by any hook (instruction without access trigger)
+    var hooksWithoutInstruction = [];
+    var steeringsWithoutAccess = [];
+    var steeringIds = new Set();
+    var steeringsReferencedByHooks = new Set();
+
+    data.nodes.forEach(function(n) {
+      if (n.type && n.type.indexOf('steering-') === 0) {
+        steeringIds.add(n.id);
+      }
+    });
+
+    data.nodes.forEach(function(n) {
+      if (n.type === 'hook-auto' || n.type === 'hook-manual') {
+        // Check if this hook has any edge pointing to a steering
+        var hasSteeringRef = false;
+        data.links.forEach(function(link) {
+          var s = typeof link.source === 'object' ? link.source.id : link.source;
+          var t = typeof link.target === 'object' ? link.target.id : link.target;
+          if (s === n.id && steeringIds.has(t)) {
+            hasSteeringRef = true;
+            steeringsReferencedByHooks.add(t);
+          }
+        });
+        if (!hasSteeringRef) {
+          hooksWithoutInstruction.push({ id: n.id, label: n.label });
+        }
+      }
+    });
+
+    // Steerings that no hook references (have instruction but no automated access/trigger)
+    data.nodes.forEach(function(n) {
+      if (n.type && n.type.indexOf('steering-') === 0) {
+        var inclusion = (n.metadata && n.metadata.inclusion) || 'always';
+        // Only flag manual/fileMatch steerings — always-included ones don't need a hook trigger
+        if (inclusion !== 'always' && inclusion !== 'auto' && !steeringsReferencedByHooks.has(n.id)) {
+          steeringsWithoutAccess.push({ id: n.id, label: n.label, inclusion: inclusion });
+        }
+      }
+    });
+
+    // 8. Suggestions: actionable recommendations
     var sugestoes = [];
     if (steeringsSoltos.length > 0) {
       sugestoes.push('Consider adding cross-references to the ' + steeringsSoltos.length + ' orphan steering(s) to integrate them into the knowledge network.');
@@ -174,12 +288,32 @@ var CognitivePanel = (function () {
     if (coverageGaps.length > 0) {
       sugestoes.push('Create steering files for the ' + coverageGaps.length + ' workspace folder(s) with no coverage.');
     }
+    if (weakInstructions.length > 0) {
+      sugestoes.push('Expand the ' + weakInstructions.length + ' weak steering(s) with fewer than 10 lines — short files make poor instructions for the AI agent.');
+    }
+    if (contextOverload.length > 0) {
+      sugestoes.push('Break down ' + contextOverload.length + ' large always-loaded steering(s) (350+ lines) into smaller focused files to avoid context window overflow.');
+    }
+    if (totalAlwaysLines > 500) {
+      sugestoes.push('Total always-loaded steering content is ' + totalAlwaysLines + ' lines — consider switching some to "inclusion: manual" or "inclusion: fileMatch" to reduce context window usage.');
+    }
+    if (hooksWithoutInstruction.length > 0) {
+      sugestoes.push(hooksWithoutInstruction.length + ' hook(s) have no steering reference — they have access/trigger but no instruction context. Link them to relevant steerings.');
+    }
+    if (steeringsWithoutAccess.length > 0) {
+      sugestoes.push(steeringsWithoutAccess.length + ' non-always steering(s) are never referenced by hooks — they have instruction but no automated access trigger.');
+    }
 
     return {
       steeringsSoltos: steeringsSoltos,
       vinculosFrageis: vinculosFrageis,
       arquivosSemContexto: arquivosSemContexto,
       coverageGaps: coverageGaps,
+      weakInstructions: weakInstructions,
+      contextOverload: contextOverload,
+      totalAlwaysLines: totalAlwaysLines,
+      hooksWithoutInstruction: hooksWithoutInstruction,
+      steeringsWithoutAccess: steeringsWithoutAccess,
       sugestoes: sugestoes
     };
   }
@@ -195,6 +329,12 @@ var CognitivePanel = (function () {
   function renderPanel(analysis) {
     var content = document.getElementById('cognitive-content');
     if (!content) { return; }
+
+    // Store latest analysis for export button
+    latestAnalysis = analysis;
+
+    // Show/hide export button based on analysis availability
+    exportBtn.style.display = analysis ? 'inline-block' : 'none';
 
     if (!analysis) {
       content.innerHTML = '<span style="color:#666;">No data available</span>';
@@ -259,6 +399,58 @@ var CognitivePanel = (function () {
       });
       if (analysis.coverageGaps.length > 5) {
         html += '<div style="padding-left:6px;color:#666;font-size:9px;">...and ' + (analysis.coverageGaps.length - 5) + ' more</div>';
+      }
+    }
+    html += '</div>';
+
+    // Weak Instructions
+    html += '<div style="margin-bottom:6px;"><span style="color:#FFC107;font-weight:bold;">Weak Instructions</span>';
+    if (analysis.weakInstructions.length === 0) {
+      html += ' <span style="color:#4CAF50;">0</span>';
+    } else {
+      html += ' <span style="color:#FFC107;">' + analysis.weakInstructions.length + '</span>';
+      analysis.weakInstructions.slice(0, 5).forEach(function(item) {
+        html += '<div style="padding-left:6px;"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + ' (' + item.lineCount + ' lines)</a></div>';
+      });
+      if (analysis.weakInstructions.length > 5) {
+        html += '<div style="padding-left:6px;color:#666;font-size:9px;">...and ' + (analysis.weakInstructions.length - 5) + ' more</div>';
+      }
+    }
+    html += '</div>';
+
+    // Context Overload
+    html += '<div style="margin-bottom:6px;"><span style="color:#E91E63;font-weight:bold;">Context Overload</span>';
+    if (analysis.contextOverload.length === 0 && analysis.totalAlwaysLines <= 500) {
+      html += ' <span style="color:#4CAF50;">OK</span>';
+    } else {
+      html += ' <span style="color:#E91E63;">' + analysis.totalAlwaysLines + ' lines</span>';
+      analysis.contextOverload.slice(0, 5).forEach(function(item) {
+        html += '<div style="padding-left:6px;"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + ' (' + item.lineCount + ' lines, max 350)</a></div>';
+      });
+      if (analysis.contextOverload.length > 5) {
+        html += '<div style="padding-left:6px;color:#666;font-size:9px;">...and ' + (analysis.contextOverload.length - 5) + ' more</div>';
+      }
+    }
+    html += '</div>';
+
+    // Instruction-Access Gap
+    var gapCount = analysis.hooksWithoutInstruction.length + analysis.steeringsWithoutAccess.length;
+    html += '<div style="margin-bottom:6px;"><span style="color:#8BC34A;font-weight:bold;">Instruction \u2194 Access</span>';
+    if (gapCount === 0) {
+      html += ' <span style="color:#4CAF50;">OK</span>';
+    } else {
+      html += ' <span style="color:#8BC34A;">' + gapCount + '</span>';
+      if (analysis.hooksWithoutInstruction.length > 0) {
+        html += '<div style="padding-left:6px;color:#888;font-size:9px;font-style:italic;">Hooks without instruction:</div>';
+        analysis.hooksWithoutInstruction.slice(0, 3).forEach(function(item) {
+          html += '<div style="padding-left:10px;"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + '</a></div>';
+        });
+      }
+      if (analysis.steeringsWithoutAccess.length > 0) {
+        html += '<div style="padding-left:6px;color:#888;font-size:9px;font-style:italic;">Steerings without access:</div>';
+        analysis.steeringsWithoutAccess.slice(0, 3).forEach(function(item) {
+          html += '<div style="padding-left:10px;"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + '</a></div>';
+        });
       }
     }
     html += '</div>';

@@ -26,6 +26,16 @@ Or use Command Palette: `Ecosystem Graph: Show`
 
 ---
 
+## 📖 Building Your Cognitive Ecosystem
+
+New to AI cognitive ecosystems? Read the complete step-by-step guide:
+
+**[→ How to Build an AI Cognitive Ecosystem for Any Project](https://github.com/WebersonRodrigues/kiro-ecosystem-graph/blob/main/docs/cognitive-ecosystem-guide.md)**
+
+Learn the 9 layers, the two fundamental pillars (Instruction + Access), hook automation patterns, and how to evolve your system from zero to full autonomy.
+
+---
+
 ## Why This Exists
 
 Your AI agent is only as good as its knowledge network. Without visibility:
