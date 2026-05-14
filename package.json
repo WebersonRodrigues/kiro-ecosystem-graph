@@ -1,0 +1,90 @@
+{
+  "name": "kiro-ecosystem-graph",
+  "displayName": "Kiro Ecosystem Graph",
+  "description": "Interactive force-directed graph visualization of your Kiro cognitive ecosystem — steerings, skills, hooks, and their interconnections rendered as a neural network brain map.",
+  "version": "0.1.2",
+  "publisher": "webersonrodrigues",
+  "license": "MIT",
+  "icon": "resources/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WebersonRodrigues/kiro-ecosystem-graph"
+  },
+  "keywords": [
+    "kiro",
+    "ecosystem",
+    "graph",
+    "visualization",
+    "steering",
+    "skills",
+    "hooks",
+    "cognitive",
+    "neural",
+    "force-directed"
+  ],
+  "galleryBanner": {
+    "color": "#0d0d0d",
+    "theme": "dark"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:ecosystemGraph.show",
+    "onView:ecosystemGraphView"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ecosystemGraph.show",
+        "title": "Ecosystem Graph: Show",
+        "icon": "$(graph)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ecosystemGraph",
+          "title": "Ecosystem Graph",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "ecosystemGraph": [
+        {
+          "type": "webview",
+          "id": "ecosystemGraphView",
+          "name": "Ecosystem Graph"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.config.js",
+    "watch": "node esbuild.config.js --watch",
+    "package": "vsce package",
+    "publish": "vsce publish",
+    "test": "mocha --require ts-node/register 'src/test/**/*.test.ts' 'src/test/**/*.property.ts'"
+  },
+  "dependencies": {
+    "force-graph": "^1.43.0"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/test-electron": "^2.3.8",
+    "@vscode/vsce": "^2.22.0",
+    "esbuild": "^0.19.11",
+    "fast-check": "^3.15.0",
+    "mocha": "^10.2.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}

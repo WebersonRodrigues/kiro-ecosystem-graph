@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Central node -->
+  <circle cx="12" cy="12" r="2.5" fill="currentColor" opacity="0.9"/>
+  <!-- Outer nodes -->
+  <circle cx="5" cy="5" r="1.5" fill="currentColor" opacity="0.7"/>
+  <circle cx="19" cy="5" r="1.5" fill="currentColor" opacity="0.7"/>
+  <circle cx="5" cy="19" r="1.5" fill="currentColor" opacity="0.7"/>
+  <circle cx="19" cy="19" r="1.5" fill="currentColor" opacity="0.7"/>
+  <circle cx="12" cy="3" r="1.2" fill="currentColor" opacity="0.6"/>
+  <circle cx="12" cy="21" r="1.2" fill="currentColor" opacity="0.6"/>
+  <circle cx="3" cy="12" r="1.2" fill="currentColor" opacity="0.6"/>
+  <circle cx="21" cy="12" r="1.2" fill="currentColor" opacity="0.6"/>
+  <!-- Edges connecting nodes -->
+  <line x1="12" y1="12" x2="5" y2="5" opacity="0.4"/>
+  <line x1="12" y1="12" x2="19" y2="5" opacity="0.4"/>
+  <line x1="12" y1="12" x2="5" y2="19" opacity="0.4"/>
+  <line x1="12" y1="12" x2="19" y2="19" opacity="0.4"/>
+  <line x1="12" y1="12" x2="12" y2="3" opacity="0.3"/>
+  <line x1="12" y1="12" x2="12" y2="21" opacity="0.3"/>
+  <line x1="12" y1="12" x2="3" y2="12" opacity="0.3"/>
+  <line x1="12" y1="12" x2="21" y2="12" opacity="0.3"/>
+  <!-- Cross connections -->
+  <line x1="5" y1="5" x2="12" y2="3" opacity="0.2"/>
+  <line x1="19" y1="5" x2="12" y2="3" opacity="0.2"/>
+  <line x1="5" y1="19" x2="12" y2="21" opacity="0.2"/>
+  <line x1="19" y1="19" x2="12" y2="21" opacity="0.2"/>
+  <line x1="5" y1="5" x2="3" y2="12" opacity="0.2"/>
+  <line x1="19" y1="5" x2="21" y2="12" opacity="0.2"/>
+</svg>
