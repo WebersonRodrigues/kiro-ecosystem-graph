@@ -121,24 +121,26 @@ var lastClickTime = 0;
   expandBtn.style.fontFamily = 'sans-serif';
   expandBtn.style.cursor = 'pointer';
   expandBtn.addEventListener('click', function () {
+    // Determine which graph instance to use (2D or 3D)
+    var activeGraph = (typeof is3DActive !== 'undefined' && is3DActive && typeof graph3DInstance !== 'undefined' && graph3DInstance) ? graph3DInstance : graph;
     if (expandActive) {
       // Restore normal repulsion
       expandActive = false;
       expandBtn.style.background = 'rgba(40,40,40,0.9)';
       expandBtn.style.color = '#ccc';
       expandBtn.style.borderColor = '#555';
-      var chargeForce = graph.d3Force('charge');
+      var chargeForce = activeGraph.d3Force('charge');
       if (chargeForce) { chargeForce.strength(settings.repulsionForce); }
-      graph.d3ReheatSimulation();
+      activeGraph.d3ReheatSimulation();
     } else {
       // Increase repulsion to spread nodes apart
       expandActive = true;
       expandBtn.style.background = 'rgba(74,158,255,0.9)';
       expandBtn.style.color = '#fff';
       expandBtn.style.borderColor = '#4A9EFF';
-      var chargeForce2 = graph.d3Force('charge');
+      var chargeForce2 = activeGraph.d3Force('charge');
       if (chargeForce2) { chargeForce2.strength(-500); }
-      graph.d3ReheatSimulation();
+      activeGraph.d3ReheatSimulation();
     }
   });
   document.body.appendChild(expandBtn);
@@ -456,6 +458,9 @@ function enterClusterMode() {
   if (clusterModeActive) { return; }
   clusterModeActive = true;
 
+  // Determine which graph instance to use
+  var activeGraph = (typeof is3DActive !== 'undefined' && is3DActive && typeof graph3DInstance !== 'undefined' && graph3DInstance) ? graph3DInstance : graph;
+
   // Compute active types from current graph data
   var typeCounts = {};
   graphData.nodes.forEach(function (n) {
@@ -477,8 +482,7 @@ function enterClusterMode() {
   });
 
   // Apply clustering forces using d3Force API
-  // Custom force function: nudge nodes toward their type's cluster center
-  graph.d3Force('clusterX', function (alpha) {
+  activeGraph.d3Force('clusterX', function (alpha) {
     graphData.nodes.forEach(function (node) {
       var center = clusterCenters[node.type];
       if (center && node.vx !== undefined) {
@@ -486,7 +490,7 @@ function enterClusterMode() {
       }
     });
   });
-  graph.d3Force('clusterY', function (alpha) {
+  activeGraph.d3Force('clusterY', function (alpha) {
     graphData.nodes.forEach(function (node) {
       var center = clusterCenters[node.type];
       if (center && node.vy !== undefined) {
@@ -495,7 +499,7 @@ function enterClusterMode() {
     });
   });
 
-  graph.d3ReheatSimulation();
+  activeGraph.d3ReheatSimulation();
 
   // Update button style
   var btn = document.getElementById('cluster-mode-btn');
@@ -518,10 +522,13 @@ function exitClusterMode() {
   clusterModeActive = false;
   clusterCenters = {};
 
+  // Determine which graph instance to use
+  var activeGraph = (typeof is3DActive !== 'undefined' && is3DActive && typeof graph3DInstance !== 'undefined' && graph3DInstance) ? graph3DInstance : graph;
+
   // Remove clustering forces
-  graph.d3Force('clusterX', null);
-  graph.d3Force('clusterY', null);
-  graph.d3ReheatSimulation();
+  activeGraph.d3Force('clusterX', null);
+  activeGraph.d3Force('clusterY', null);
+  activeGraph.d3ReheatSimulation();
 
   // Update button style
   var btn = document.getElementById('cluster-mode-btn');
