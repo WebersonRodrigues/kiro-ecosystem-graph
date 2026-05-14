@@ -2,7 +2,7 @@
 
 **See your AI's brain. Fix what's broken.**
 
-![Graph Overview](resources/screenshots-graph-overview.png)
+![Graph Overview](https://raw.githubusercontent.com/WebersonRodrigues/kiro-ecosystem-graph/main/resources/screenshots-graph-overview.png)
 
 > Interactive force-directed graph that visualizes your Kiro cognitive ecosystem — steerings, skills, hooks, and their interconnections rendered as a neural network brain map.
 
@@ -20,7 +20,7 @@
 2. Open a workspace with `.kiro/steering/` files
 3. Click the brain icon in the activity bar
 
-![Activity Bar Icon](resources/screenshots-icon.png)
+![Activity Bar Icon](https://raw.githubusercontent.com/WebersonRodrigues/kiro-ecosystem-graph/main/resources/screenshots-icon.png)
 
 Or use Command Palette: `Ecosystem Graph: Show`
 
@@ -57,7 +57,7 @@ The graph revealed their authentication flow was connected to only 1 other docum
 
 Click the brain button in the toolbar to open the analysis panel:
 
-![Cognitive Analysis Panel](resources/screenshots-cognitive-panel.png)
+![Cognitive Analysis Panel](https://raw.githubusercontent.com/WebersonRodrigues/kiro-ecosystem-graph/main/resources/screenshots-cognitive-panel.png)
 
 - **Orphan Steerings** — files with zero connections (isolated knowledge)
 - **Fragile Links** — single-reference connections that could easily break
