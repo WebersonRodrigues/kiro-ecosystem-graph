@@ -2,7 +2,7 @@
 
 ## Overview
 
-A extensao Ecosystem Graph e um VS Code/Kiro extension que parseia steering files (`.kiro/steering/*.md`) de todos os workspace folders de um multi-root workspace e renderiza um grafo interativo force-directed em um webview panel. O grafo mostra as conexoes entre steerings, arquivos de codigo, modulos e entidades do ecossistema Fourkeep.
+A extensao Ecosystem Graph e um VS Code/Kiro extension que parseia steering files (`.kiro/steering/*.md`) de todos os workspace folders de um multi-root workspace e renderiza um grafo interativo force-directed em um webview panel. O grafo mostra as conexoes entre steerings, arquivos de codigo, modulos e entidades do ecossistema.
 
 A extensao e escrita em TypeScript, usa a VS Code Extension API para descoberta de arquivos e file watching, e renderiza o grafo usando `force-graph` (wrapper leve sobre d3-force com canvas 2D) no webview. Toda a logica roda localmente, sem dependencias externas ou rede.
 
@@ -473,7 +473,7 @@ A extensao usa duas camadas complementares de testes:
 
 Focam em:
 - Integracao com VS Code Extension API (command registration, webview lifecycle)
-- Exemplos concretos de parsing com steering files reais do Fourkeep
+- Exemplos concretos de parsing com steering files reais do meu projeto
 - Edge cases: arquivo vazio, front-matter sem inclusion, referencia circular
 - Comportamento do webview (mensagens postMessage)
 

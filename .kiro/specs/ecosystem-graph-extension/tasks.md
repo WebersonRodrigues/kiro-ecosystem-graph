@@ -221,7 +221,7 @@ Implementacao incremental da extensao VS Code "Ecosystem Graph" em TypeScript. C
 ## Notes
 
 - Extension source lives in `Workspace/tools/ecosystem-graph/` (will be extracted to its own repo later)
-- The extension is fully generic — no references to Fourkeep or any specific project in the source code. Works with any Kiro workspace that has steering files.
+- The extension is fully generic — no references to any specific project in the source code. Works with any Kiro workspace that has steering files.
 - Extension name for marketplace: "Kiro Ecosystem Graph" (or similar generic name)
 - Tasks marked with `*` are optional and can be skipped for faster MVP
 - Each task references specific requirements for traceability

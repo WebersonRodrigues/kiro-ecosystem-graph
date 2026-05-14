@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Extensao gratuita e open-source para VS Code/Kiro que renderiza um grafo interativo do ecossistema Fourkeep. Inspirada na graph view do Obsidian, a extensao parseia os arquivos de steering (`.kiro/steering/*.md`) de todos os workspace folders, extrai referencias cruzadas entre arquivos, modulos, entidades e endpoints, e apresenta uma visualizacao navegavel em webview panel. O objetivo e dar visibilidade imediata das conexoes entre os componentes do ecossistema (API, Integrador, Mobile, Manifests) sem depender de ferramentas externas pagas.
+Extensao gratuita e open-source para VS Code/Kiro que renderiza um grafo interativo do ecossistema. Inspirada na graph view do Obsidian, a extensao parseia os arquivos de steering (`.kiro/steering/*.md`) de todos os workspace folders, extrai referencias cruzadas entre arquivos, modulos, entidades e endpoints, e apresenta uma visualizacao navegavel em webview panel. O objetivo e dar visibilidade imediata das conexoes entre os componentes do ecossistema (API, Integrador, Mobile, Manifests) sem depender de ferramentas externas pagas.
 
 ## Glossary
 
