@@ -72,7 +72,11 @@ var lastClickTime = 0;
   focusBtn.style.cursor = 'pointer';
   focusBtn.style.display = 'none';
   focusBtn.addEventListener('click', function () {
-    exitFocusMode();
+    if (window.is3DActive && typeof exit3DFocusMode === 'function') {
+      exit3DFocusMode();
+    } else {
+      exitFocusMode();
+    }
   });
   document.body.appendChild(focusBtn);
 

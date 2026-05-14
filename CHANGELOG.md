@@ -1,22 +1,42 @@
 # Changelog
 
-## 0.1.5 (2026-05-14)
+## 0.2.0 (2026-05-14)
 
 ### Features
 
-- **Export Cognitive Analysis** — New "Export" button in the Cognitive Analysis panel generates a structured Markdown report with all findings, tips per item, and "Instructions for Kiro AI" section ready to paste into chat
-- **3 new analysis categories:**
-  - Weak Instructions — steerings with fewer than 10 lines (too short to be effective prompts)
-  - Context Window Overload — always-loaded steerings exceeding 350 lines + total context budget tracking
-  - Instruction ↔ Access Gap — hooks without steering references and steerings without hook triggers
-- **Cognitive Ecosystem Guide** — Complete English guide (`docs/cognitive-ecosystem-guide.md`) covering the 9 layers, hook patterns, skills, and step-by-step setup from scratch
-- Guide linked in README for marketplace visibility
+- **3D Mode** — Toggle between 2D and 3D visualization with the "3D" button in the toolbar
+  - Orbit controls (rotate, zoom, pan)
+  - Node drag with position locking (nodes stay where you put them)
+  - Double-click focus mode (isolate connected nodes) with "Return to full graph" button
+  - Directional particles on links
+  - Lazy-loaded (3D library only loads on first use)
+  - WebGL fallback to 2D if GPU unavailable
+  - Cluster and Expand buttons work in both modes
+  - Type filters work in both modes
+  - 2D-only features (Heatmap, Constellation, Synaptic) hidden in 3D mode
+  - Shape legend hidden in 3D mode (all nodes are spheres)
+- **Export Cognitive Analysis** — "Export" button in the Cognitive Analysis panel generates a structured Markdown report
+  - All findings with per-item tips
+  - "Instructions for Kiro AI" section ready to paste into chat
+- **3 new cognitive analysis categories:**
+  - Weak Instructions — steerings with fewer than 10 lines
+  - Context Window Overload — always-loaded steerings exceeding 350 lines
+  - Instruction ↔ Access Gap — hooks without steering references and vice versa
+- **Heartbeat pulse** — Each node has a subtle inner pulse (tum-tum rhythm) giving the ecosystem a living feel
+- **Central pulse orb** — Glowing orb at the center of the graph (both 2D and 3D)
+- **Cognitive Ecosystem Guide** — Complete English guide linked from README
 
 ### Fixes
 
-- Fixed extension not loading on other machines — all webview scripts and force-graph now served from `dist/` instead of `src/` (which was excluded from .vsix by `.vscodeignore`)
-- Removed `StatsHistoryService` — no longer generates `ecosystem-graph-stats.json` in the workspace
-- Cleaned `.vscodeignore` to exclude `.kiro/**` and `*.vsix` from package
+- Fixed extension not loading on other machines (all assets served from dist/)
+- Removed StatsHistoryService (no more ecosystem-graph-stats.json generation)
+- Cleaned .vscodeignore (excludes .kiro/ and *.vsix)
+
+### Documentation
+
+- README updated: "Built for Kiro IDE, also compatible with VS Code"
+- Link to cognitive ecosystem guide in README
+- package.json description mentions Kiro IDE
 
 ## 0.1.3 (2026-05-14)
 
