@@ -1563,6 +1563,10 @@ vscode.postMessage({ type: 'ready' });
       if (el) { el.style.display = 'none'; }
     });
 
+    // Hide shape legend (not applicable in 3D — all spheres)
+    var shapeLegend = document.getElementById('shape-legend');
+    if (shapeLegend) { shapeLegend.style.display = 'none'; }
+
     // Show 3D container
     container3D.style.display = 'block';
 
@@ -1582,7 +1586,14 @@ vscode.postMessage({ type: 'ready' });
         .nodeResolution(64)
         .nodeOpacity(1)
         .nodeVal(function(node) {
-          return getNodeSize(node) * 3;
+          // Different sizes per type for visual differentiation
+          var base = getNodeSize(node);
+          if (node.type === 'skill') {
+            return base * 1.5; // Skills: smaller
+          } else if (node.type === 'hook-auto' || node.type === 'hook-manual') {
+            return base * 1; // Hooks: smallest
+          }
+          return base * 3; // Steerings: largest
         })
         .nodeColor(function(node) {
           return COLOR_MAP[node.type] || COLOR_MAP['unknown'];
@@ -1610,15 +1621,60 @@ vscode.postMessage({ type: 'ready' });
         .linkDirectionalParticleResolution(16)
         .linkDirectionalParticleColor(function() { return 'rgba(74, 158, 255, 0.9)'; })
         .onNodeClick(function(node) {
-          if (node && node.filePath) {
-            vscode.postMessage({ type: 'openFile', filePath: node.filePath });
+          if (!node) { return; }
+          var now = Date.now();
+          if (node.__lastClick && (now - node.__lastClick) < 400) {
+            // Double-click: focus mode — show only connected nodes
+            node.__lastClick = 0;
+            enter3DFocusMode(node);
+          } else {
+            node.__lastClick = now;
+            // Single click: open file (delayed to distinguish from double)
+            setTimeout(function() {
+              if (node.__lastClick && node.filePath) {
+                vscode.postMessage({ type: 'openFile', filePath: node.filePath });
+              }
+            }, 400);
           }
         });
 
-      // High quality renderer
+      // Background click exits focus mode
+      graph3DInstance.onBackgroundClick(function() {
+        exit3DFocusMode();
+      });
+
+      // High quality renderer + lighting for depth
       var renderer = graph3DInstance.renderer();
       if (renderer) {
         renderer.setPixelRatio(window.devicePixelRatio || 2);
+      }
+
+      // Add better lighting for 3D depth perception
+      var scene = graph3DInstance.scene();
+      if (scene) {
+        try {
+          var existingLight = null;
+          scene.traverse(function(obj) {
+            if (obj.isLight && !existingLight) { existingLight = obj; }
+          });
+
+          if (existingLight) {
+            var fill = existingLight.clone();
+            fill.intensity = 0.8 * Math.PI;
+            fill.position.set(-200, -100, -200);
+            scene.add(fill);
+
+            var rim = existingLight.clone();
+            rim.intensity = 0.6 * Math.PI;
+            rim.position.set(0, 300, -150);
+            scene.add(rim);
+
+            var bottom = existingLight.clone();
+            bottom.intensity = 0.3 * Math.PI;
+            bottom.position.set(100, -200, 50);
+            scene.add(bottom);
+          }
+        } catch(e) { /* graceful */ }
       }
 
       // Apply current graph data
@@ -1663,6 +1719,61 @@ vscode.postMessage({ type: 'ready' });
     }
   }
 
+  // 3D Focus Mode: double-click shows only connected nodes
+  var focus3DOriginalData = null;
+
+  function enter3DFocusMode(node) {
+    if (!graph3DInstance || !graphData) { return; }
+
+    // Save original data for restore
+    if (!focus3DOriginalData) {
+      focus3DOriginalData = { nodes: graphData.nodes.slice(), links: graphData.links.slice() };
+    }
+
+    // Find 1-hop neighbors
+    var neighborIds = new Set();
+    neighborIds.add(node.id);
+    graphData.links.forEach(function(link) {
+      var s = typeof link.source === 'object' ? link.source.id : link.source;
+      var t = typeof link.target === 'object' ? link.target.id : link.target;
+      if (s === node.id) { neighborIds.add(t); }
+      if (t === node.id) { neighborIds.add(s); }
+    });
+
+    var filteredNodes = graphData.nodes.filter(function(n) { return neighborIds.has(n.id); });
+    var filteredLinks = graphData.links.filter(function(link) {
+      var s = typeof link.source === 'object' ? link.source.id : link.source;
+      var t = typeof link.target === 'object' ? link.target.id : link.target;
+      return neighborIds.has(s) && neighborIds.has(t);
+    });
+
+    graph3DInstance.graphData({ nodes: filteredNodes, links: filteredLinks });
+
+    // Show the existing "Return to full graph" button
+    var exitBtn = document.getElementById('focus-mode-exit-btn');
+    if (exitBtn) { exitBtn.style.display = 'block'; }
+
+    // Zoom to fit after layout settles
+    setTimeout(function() {
+      if (graph3DInstance) {
+        graph3DInstance.zoomToFit(500, 50);
+      }
+    }, 600);
+  }
+
+  // Exit 3D focus mode
+  function exit3DFocusMode() {
+    if (focus3DOriginalData && graph3DInstance) {
+      graph3DInstance.graphData({ nodes: focus3DOriginalData.nodes, links: focus3DOriginalData.links });
+      focus3DOriginalData = null;
+    }
+    var exitBtn = document.getElementById('focus-mode-exit-btn');
+    if (exitBtn) { exitBtn.style.display = 'none'; }
+  }
+
+  // Expose for interactions-panel.js
+  window.exit3DFocusMode = exit3DFocusMode;
+
   function disable3D() {
     is3DActive = false;
     window.is3DActive = false;
@@ -1705,6 +1816,10 @@ vscode.postMessage({ type: 'ready' });
       var el = document.getElementById(id);
       if (el) { el.style.display = ''; }
     });
+
+    // Show shape legend back
+    var shapeLegend = document.getElementById('shape-legend');
+    if (shapeLegend) { shapeLegend.style.display = ''; }
 
     // Persist mode
     var state = vscode.getState() || {};
