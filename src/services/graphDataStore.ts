@@ -1,6 +1,7 @@
 import * as path from 'path';
 import { GraphNode, GraphEdge, ParseResult, SerializedGraph } from '../types';
 import { NodeClassifier } from './nodeClassifier';
+import { isEcosystemRelevantPath } from './parserService';
 
 /**
  * In-memory store for the ecosystem graph.
@@ -58,6 +59,10 @@ export class GraphDataStore {
 
     // 3. For each reference, ensure target node exists
     for (const ref of references) {
+      if (!isEcosystemRelevantPath(ref.target)) {
+        continue;
+      }
+
       if (!this.nodes.has(ref.target)) {
         // Create unresolved placeholder node for the target
         const label = this.deriveLabelFromPath(ref.target);
@@ -77,6 +82,10 @@ export class GraphDataStore {
 
     // 4. Add new edges from the references
     for (const ref of references) {
+      if (!isEcosystemRelevantPath(ref.target)) {
+        continue;
+      }
+
       const edge: GraphEdge = {
         source: ref.source,
         target: ref.target,

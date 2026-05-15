@@ -4,6 +4,23 @@ import { NodeClassifier } from './nodeClassifier';
 import { PathResolver } from './pathResolver';
 
 /**
+ * Determines whether a target path refers to an ecosystem-relevant file.
+ * Only `.md`, `.json`, and `.kiro.hook` extensions are considered relevant.
+ *
+ * CRITICAL: The `.kiro/` prefix alone is NOT sufficient — PathResolver resolves
+ * bare filenames (e.g., "IProdutoService.cs") to ".kiro/steering/IProdutoService.cs",
+ * which would bypass a prefix-only check.
+ *
+ * @param targetPath - The resolved target path to check
+ * @returns true if the path is ecosystem-relevant, false otherwise
+ */
+export function isEcosystemRelevantPath(targetPath: string): boolean {
+  const cleanPath = targetPath.split('#')[0]; // strip fragment
+  const ext = path.extname(cleanPath).toLowerCase();
+  return ext === '.md' || ext === '.json' || cleanPath.endsWith('.kiro.hook');
+}
+
+/**
  * Regex patterns for extracting references from steering file markdown content.
  * Each pattern targets a specific reference format used in the ecosystem.
  */
@@ -419,6 +436,10 @@ export class ParserService {
           file.workspaceFolder
         );
 
+        if (!isEcosystemRelevantPath(resolved)) {
+          continue;
+        }
+
         references.push({
           source: file.relativePath,
           target: resolved,
@@ -485,6 +506,10 @@ export class ParserService {
           file.relativePath,
           file.workspaceFolder
         );
+
+        if (!isEcosystemRelevantPath(resolved)) {
+          continue;
+        }
 
         references.push({
           source: file.relativePath,
