@@ -123,6 +123,706 @@ var CognitivePanel = (function () {
   // Cognitive Analysis Computation
   // ─────────────────────────────────────────────────────────────────────────
 
+  // ─── Graph Validations ─────────────────────────────────────────────────
+
+  /**
+   * Tarjan's SCC algorithm to find strongly connected components.
+   * @param {any[]} nodes
+   * @param {any[]} links
+   * @returns {string[][]} Array of SCCs (each SCC is array of node IDs)
+   */
+  function tarjanSCC(nodes, links) {
+    var adj = {};
+    nodes.forEach(function(n) { adj[n.id] = []; });
+    links.forEach(function(link) {
+      var s = typeof link.source === 'object' ? link.source.id : link.source;
+      var t = typeof link.target === 'object' ? link.target.id : link.target;
+      if (adj[s]) { adj[s].push(t); }
+    });
+
+    var index = 0;
+    var stack = [];
+    var onStack = {};
+    var indices = {};
+    var lowlinks = {};
+    var sccs = [];
+
+    function strongconnect(v) {
+      indices[v] = index;
+      lowlinks[v] = index;
+      index++;
+      stack.push(v);
+      onStack[v] = true;
+
+      var neighbors = adj[v] || [];
+      for (var i = 0; i < neighbors.length; i++) {
+        var w = neighbors[i];
+        if (indices[w] === undefined) {
+          strongconnect(w);
+          lowlinks[v] = Math.min(lowlinks[v], lowlinks[w]);
+        } else if (onStack[w]) {
+          lowlinks[v] = Math.min(lowlinks[v], indices[w]);
+        }
+      }
+
+      if (lowlinks[v] === indices[v]) {
+        var scc = [];
+        var w2;
+        do {
+          w2 = stack.pop();
+          onStack[w2] = false;
+          scc.push(w2);
+        } while (w2 !== v);
+        sccs.push(scc);
+      }
+    }
+
+    nodes.forEach(function(n) {
+      if (indices[n.id] === undefined) {
+        strongconnect(n.id);
+      }
+    });
+
+    return sccs;
+  }
+
+  /**
+   * Detect dead loops: isolated cycles with no external entry.
+   * @param {any[]} nodes
+   * @param {any[]} links
+   * @returns {{ nodes: {id:string, label:string}[], size: number }[]}
+   */
+  function detectDeadLoops(nodes, links) {
+    var sccs = tarjanSCC(nodes, links);
+    var cycles = sccs.filter(function(scc) { return scc.length > 1; });
+    var nodeMap = {};
+    nodes.forEach(function(n) { nodeMap[n.id] = n; });
+
+    var deadLoops = [];
+    for (var i = 0; i < cycles.length; i++) {
+      var cycle = cycles[i];
+      var cycleSet = {};
+      cycle.forEach(function(id) { cycleSet[id] = true; });
+
+      var hasExternalEntry = false;
+      for (var j = 0; j < links.length; j++) {
+        var link = links[j];
+        var t = typeof link.target === 'object' ? link.target.id : link.target;
+        var s = typeof link.source === 'object' ? link.source.id : link.source;
+        if (cycleSet[t] && !cycleSet[s]) {
+          hasExternalEntry = true;
+          break;
+        }
+      }
+
+      if (!hasExternalEntry) {
+        var loopNodes = cycle.map(function(id) {
+          var n = nodeMap[id];
+          return { id: id, label: n ? n.label : id };
+        });
+        deadLoops.push({ nodes: loopNodes, size: cycle.length });
+      }
+    }
+
+    return deadLoops;
+  }
+
+  /**
+   * Compute hops to reach from entry points using BFS.
+   * Entry points: nodes with inclusion=always|auto OR type hook-auto|hook-manual.
+   * @param {any[]} nodes
+   * @param {any[]} links
+   * @returns {{ id: string, label: string, hops: number }[]}
+   */
+  function computeHopsToReach(nodes, links) {
+    // Build adjacency list (source→target direction)
+    var adj = {};
+    nodes.forEach(function(n) { adj[n.id] = []; });
+    links.forEach(function(link) {
+      var s = typeof link.source === 'object' ? link.source.id : link.source;
+      var t = typeof link.target === 'object' ? link.target.id : link.target;
+      if (adj[s]) { adj[s].push(t); }
+    });
+
+    // Identify entry points
+    var distance = {};
+    var queue = [];
+    nodes.forEach(function(n) {
+      var inclusion = (n.metadata && n.metadata.inclusion) || '';
+      var isEntry = inclusion === 'always' || inclusion === 'auto' ||
+        n.type === 'hook-auto' || n.type === 'hook-manual';
+      if (isEntry) {
+        distance[n.id] = 0;
+        queue.push(n.id);
+      }
+    });
+
+    // BFS from all entry points
+    var head = 0;
+    while (head < queue.length) {
+      var current = queue[head++];
+      var neighbors = adj[current] || [];
+      for (var i = 0; i < neighbors.length; i++) {
+        var neighbor = neighbors[i];
+        if (distance[neighbor] === undefined) {
+          distance[neighbor] = distance[current] + 1;
+          queue.push(neighbor);
+        }
+      }
+    }
+
+    // Filter steerings with distance >= 4
+    var alerts = [];
+    nodes.forEach(function(n) {
+      if (n.type && n.type.indexOf('steering-') === 0) {
+        var hops = distance[n.id];
+        if (hops === undefined || hops >= 4) {
+          alerts.push({
+            id: n.id,
+            label: n.label,
+            hops: hops === undefined ? 999 : hops,
+          });
+        }
+      }
+    });
+
+    return alerts;
+  }
+
+  // ─── Content Validations ───────────────────────────────────────────────
+
+  /**
+   * Detect duplicate intent between always-loaded steerings using Jaccard similarity.
+   * @param {any[]} nodes
+   * @returns {{ nodeA: {id,label}, nodeB: {id,label}, overlap: number }[]}
+   */
+  function detectDuplicateIntent(nodes) {
+    var alwaysSteerings = nodes.filter(function(n) {
+      return n.type && n.type.indexOf('steering-') === 0 &&
+        n.metadata &&
+        (n.metadata.inclusion === 'always' || n.metadata.inclusion === 'auto') &&
+        n.metadata.keywords && n.metadata.keywords.length > 0;
+    });
+
+    var duplicates = [];
+    for (var i = 0; i < alwaysSteerings.length - 1; i++) {
+      for (var j = i + 1; j < alwaysSteerings.length; j++) {
+        var score = computeDuplicateScore(alwaysSteerings[i], alwaysSteerings[j]);
+        if (score > 0.6) {
+          duplicates.push({
+            nodeA: { id: alwaysSteerings[i].id, label: alwaysSteerings[i].label },
+            nodeB: { id: alwaysSteerings[j].id, label: alwaysSteerings[j].label },
+            overlap: Math.round(score * 100),
+          });
+        }
+      }
+    }
+
+    return duplicates;
+  }
+
+  /**
+   * Compute combined similarity score between two steering nodes.
+   */
+  function computeDuplicateScore(nodeA, nodeB) {
+    var kwA = new Set(nodeA.metadata.keywords || []);
+    var kwB = new Set(nodeB.metadata.keywords || []);
+    var jaccard = computeJaccard(kwA, kwB);
+
+    var headersA = new Set(nodeA.metadata.sectionHeaders || []);
+    var headersB = new Set(nodeB.metadata.sectionHeaders || []);
+    var maxHeaders = Math.max(headersA.size, headersB.size, 1);
+    var headerIntersection = setIntersectionSize(headersA, headersB);
+    var headerOverlap = headerIntersection / maxHeaders;
+
+    return jaccard * 0.7 + headerOverlap * 0.3;
+  }
+
+  /**
+   * Compute Jaccard coefficient between two sets.
+   */
+  function computeJaccard(setA, setB) {
+    if (setA.size === 0 && setB.size === 0) { return 0; }
+    var intersection = setIntersectionSize(setA, setB);
+    var union = setA.size + setB.size - intersection;
+    return union === 0 ? 0 : intersection / union;
+  }
+
+  /**
+   * Count intersection size between two sets.
+   */
+  function setIntersectionSize(setA, setB) {
+    var count = 0;
+    setA.forEach(function(item) {
+      if (setB.has(item)) { count++; }
+    });
+    return count;
+  }
+
+  /**
+   * Detect passive knowledge: steerings with < 10% actionable lines.
+   * @param {any[]} nodes
+   * @returns {{ id: string, label: string, actionablePercent: number }[]}
+   */
+  function detectPassiveKnowledge(nodes) {
+    var passive = [];
+    nodes.forEach(function(n) {
+      if (n.type && n.type.indexOf('steering-') === 0) {
+        var ratio = (n.metadata && n.metadata.actionableRatio !== undefined)
+          ? n.metadata.actionableRatio : 1.0;
+        if (ratio < 0.10) {
+          passive.push({
+            id: n.id,
+            label: n.label,
+            actionablePercent: Math.round(ratio * 100),
+          });
+        }
+      }
+    });
+    return passive;
+  }
+
+  /**
+   * Detect low signal-to-noise: steerings with 10% <= ratio < 20%.
+   * @param {any[]} nodes
+   * @returns {{ id: string, label: string, signalRatio: number }[]}
+   */
+  function detectLowSignalToNoise(nodes) {
+    var lowSignal = [];
+    nodes.forEach(function(n) {
+      if (n.type && n.type.indexOf('steering-') === 0) {
+        var ratio = (n.metadata && n.metadata.actionableRatio !== undefined)
+          ? n.metadata.actionableRatio : 1.0;
+        if (ratio >= 0.10 && ratio < 0.20) {
+          lowSignal.push({
+            id: n.id,
+            label: n.label,
+            signalRatio: Math.round(ratio * 100),
+          });
+        }
+      }
+    });
+    return lowSignal;
+  }
+
+  /**
+   * Opposite imperative pairs for contradiction detection.
+   */
+  var OPPOSITE_PAIRS = [
+    ['always', 'never'],
+    ['use', 'avoid'],
+    ['use', 'do_not'],
+    ['prefer', 'avoid'],
+    ['must', 'do_not'],
+    ['shall', 'do_not'],
+  ];
+
+  /**
+   * Check if two patterns form an opposite pair.
+   */
+  function isOpposite(patternA, patternB) {
+    for (var i = 0; i < OPPOSITE_PAIRS.length; i++) {
+      var pair = OPPOSITE_PAIRS[i];
+      if ((patternA === pair[0] && patternB === pair[1]) ||
+          (patternA === pair[1] && patternB === pair[0])) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Detect contradictions between always-loaded steerings.
+   * @param {any[]} nodes
+   * @returns {Array}
+   */
+  function detectContradictions(nodes) {
+    var alwaysSteerings = nodes.filter(function(n) {
+      return n.type && n.type.indexOf('steering-') === 0 &&
+        n.metadata &&
+        (n.metadata.inclusion === 'always' || n.metadata.inclusion === 'auto') &&
+        n.metadata.imperativeLines && n.metadata.imperativeLines.length > 0;
+    });
+
+    var contradictions = [];
+    for (var i = 0; i < alwaysSteerings.length - 1; i++) {
+      for (var j = i + 1; j < alwaysSteerings.length; j++) {
+        var found = findContradictions(alwaysSteerings[i], alwaysSteerings[j]);
+        for (var k = 0; k < found.length; k++) {
+          contradictions.push(found[k]);
+        }
+      }
+    }
+
+    return contradictions;
+  }
+
+  /**
+   * Find contradictions between two steering nodes.
+   */
+  function findContradictions(nodeA, nodeB) {
+    var linesA = nodeA.metadata.imperativeLines;
+    var linesB = nodeB.metadata.imperativeLines;
+    var results = [];
+
+    for (var a = 0; a < linesA.length; a++) {
+      for (var b = 0; b < linesB.length; b++) {
+        if (isOpposite(linesA[a].pattern, linesB[b].pattern) &&
+            linesA[a].subject === linesB[b].subject) {
+          results.push({
+            nodeA: { id: nodeA.id, label: nodeA.label },
+            nodeB: { id: nodeB.id, label: nodeB.label },
+            snippetA: linesA[a].text,
+            snippetB: linesB[b].text,
+            conflictType: linesA[a].pattern + ' vs ' + linesB[b].pattern,
+          });
+        }
+      }
+    }
+
+    return results;
+  }
+
+  // ─── Structure Validations ─────────────────────────────────────────────
+
+  /**
+   * All IDE events available for hook coverage mapping.
+   */
+  var ALL_IDE_EVENTS = [
+    'fileEdited', 'fileCreated', 'fileDeleted', 'userTriggered',
+    'promptSubmit', 'agentStop', 'preToolUse', 'postToolUse',
+    'preTaskExecution', 'postTaskExecution',
+  ];
+
+  /**
+   * Compute hook coverage map: which IDE events have hooks configured.
+   * @param {any[]} nodes
+   * @returns {{ covered: {event,hookCount}[], uncovered: {event}[] }}
+   */
+  function computeHookCoverageMap(nodes) {
+    var coverage = {};
+    ALL_IDE_EVENTS.forEach(function(event) { coverage[event] = 0; });
+
+    nodes.forEach(function(n) {
+      if (n.type === 'hook-auto' || n.type === 'hook-manual') {
+        var whenType = n.metadata && n.metadata.whenType;
+        if (whenType && coverage[whenType] !== undefined) {
+          coverage[whenType]++;
+        }
+      }
+    });
+
+    var covered = [];
+    var uncovered = [];
+    ALL_IDE_EVENTS.forEach(function(event) {
+      if (coverage[event] > 0) {
+        covered.push({ event: event, hookCount: coverage[event] });
+      } else {
+        uncovered.push({ event: event });
+      }
+    });
+
+    return { covered: covered, uncovered: uncovered };
+  }
+
+  /**
+   * Decision keywords for decision path completeness check.
+   */
+  var DECISION_KEYWORDS = [
+    'decide', 'choose', 'when', 'condition', 'criteria',
+    'decida', 'escolha', 'quando', 'condição', 'critério',
+  ];
+
+  /**
+   * Check decision path completeness: hook→steering chains.
+   * @param {any[]} nodes
+   * @param {any[]} links
+   * @returns {{ hooksWithoutDecisionSteering: Array, steeringsWithoutHook: Array }}
+   */
+  function checkDecisionPathCompleteness(nodes, links) {
+    var steeringIds = new Set();
+    nodes.forEach(function(n) {
+      if (n.type && n.type.indexOf('steering-') === 0) {
+        steeringIds.add(n.id);
+      }
+    });
+
+    // Build hook→steering edges
+    var hookToSteerings = {};
+    var steeringFromHooks = new Set();
+    links.forEach(function(link) {
+      var s = typeof link.source === 'object' ? link.source.id : link.source;
+      var t = typeof link.target === 'object' ? link.target.id : link.target;
+      var sourceNode = nodes.find(function(n) { return n.id === s; });
+      if (sourceNode && (sourceNode.type === 'hook-auto' || sourceNode.type === 'hook-manual')) {
+        if (steeringIds.has(t)) {
+          if (!hookToSteerings[s]) { hookToSteerings[s] = []; }
+          hookToSteerings[s].push(t);
+          steeringFromHooks.add(t);
+        }
+      }
+    });
+
+    // Hooks without any steering reference
+    var hooksWithoutDecisionSteering = [];
+    nodes.forEach(function(n) {
+      if (n.type === 'hook-auto' || n.type === 'hook-manual') {
+        var steerings = hookToSteerings[n.id] || [];
+        if (steerings.length === 0) {
+          hooksWithoutDecisionSteering.push({
+            id: n.id, label: n.label, gap: 'no-steering',
+          });
+        }
+      }
+    });
+
+    // Decision steerings without hook trigger
+    var steeringsWithoutHook = [];
+    nodes.forEach(function(n) {
+      if (n.type && n.type.indexOf('steering-') === 0 && hasDecisionContent(n)) {
+        var inclusion = (n.metadata && n.metadata.inclusion) || 'always';
+        if (inclusion !== 'always' && inclusion !== 'auto') {
+          if (!steeringFromHooks.has(n.id)) {
+            steeringsWithoutHook.push({
+              id: n.id, label: n.label, gap: 'no-hook',
+            });
+          }
+        }
+      }
+    });
+
+    return {
+      hooksWithoutDecisionSteering: hooksWithoutDecisionSteering,
+      steeringsWithoutHook: steeringsWithoutHook,
+    };
+  }
+
+  /**
+   * Check if a node has decision-related content in its keywords.
+   */
+  function hasDecisionContent(node) {
+    var keywords = (node.metadata && node.metadata.keywords) || [];
+    for (var i = 0; i < keywords.length; i++) {
+      if (DECISION_KEYWORDS.indexOf(keywords[i].toLowerCase()) !== -1) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Keywords for quality gate detection.
+   */
+  var REVIEW_KEYWORDS_HOOK = [
+    'review', 'validate', 'check', 'verify', 'lint', 'test',
+    'quality', 'standard', 'convention', 'padrão', 'qualidade',
+    'validar', 'verificar',
+  ];
+
+  var QUALITY_GATE_KEYWORDS = [
+    'review', 'code-review', 'quality', 'standard', 'convention',
+    'test', 'lint', 'ci', 'pipeline', 'approval',
+    'merge-request', 'pull-request',
+  ];
+
+  /**
+   * Check quality gate maturity level.
+   * @param {any[]} nodes
+   * @param {any[]} links
+   * @returns {object} QualityGateResult
+   */
+  function checkQualityGate(nodes, links) {
+    var selfReviewHooks = findSelfReviewHooks(nodes);
+    var qualitySteerings = findQualitySteerings(nodes);
+    var postTaskReviewHooks = findPostTaskReviewHooks(nodes, links, qualitySteerings);
+
+    var hasSelfReview = selfReviewHooks.length > 0;
+    var hasQualitySteering = qualitySteerings.length > 0;
+    var hasPostTaskReview = postTaskReviewHooks.length > 0;
+
+    var maturityLevel = 0;
+    if (hasSelfReview && hasQualitySteering && hasPostTaskReview) {
+      maturityLevel = 2;
+    } else if (hasSelfReview || hasQualitySteering) {
+      maturityLevel = 1;
+    }
+
+    return {
+      maturityLevel: maturityLevel,
+      selfReviewHooks: selfReviewHooks.map(function(n) { return { id: n.id, label: n.label }; }),
+      qualitySteerings: qualitySteerings.map(function(n) { return { id: n.id, label: n.label }; }),
+      postTaskReviewHooks: postTaskReviewHooks.map(function(n) { return { id: n.id, label: n.label }; }),
+      missing: {
+        needsSelfReview: !hasSelfReview,
+        needsQualitySteering: !hasQualitySteering,
+        needsPostTaskReview: !hasPostTaskReview,
+      },
+    };
+  }
+
+  /**
+   * Find hooks with preToolUse/postToolUse that have review keywords.
+   */
+  function findSelfReviewHooks(nodes) {
+    return nodes.filter(function(n) {
+      if (n.type !== 'hook-auto' && n.type !== 'hook-manual') { return false; }
+      var whenType = n.metadata && n.metadata.whenType;
+      if (whenType !== 'preToolUse' && whenType !== 'postToolUse') { return false; }
+      var desc = ((n.metadata && n.metadata.description) || '').toLowerCase();
+      var label = n.label.toLowerCase();
+      return REVIEW_KEYWORDS_HOOK.some(function(kw) {
+        return desc.indexOf(kw) !== -1 || label.indexOf(kw) !== -1;
+      });
+    });
+  }
+
+  /**
+   * Find steerings with quality gate keywords.
+   */
+  function findQualitySteerings(nodes) {
+    return nodes.filter(function(n) {
+      if (!n.type || n.type.indexOf('steering-') !== 0) { return false; }
+      var keywords = (n.metadata && n.metadata.keywords) || [];
+      var label = n.label.toLowerCase();
+      return QUALITY_GATE_KEYWORDS.some(function(kw) {
+        return keywords.indexOf(kw) !== -1 || label.indexOf(kw) !== -1;
+      });
+    });
+  }
+
+  /**
+   * Find post-task hooks that reference quality steerings.
+   */
+  function findPostTaskReviewHooks(nodes, links, qualitySteerings) {
+    var qualityIds = new Set();
+    qualitySteerings.forEach(function(n) { qualityIds.add(n.id); });
+
+    return nodes.filter(function(n) {
+      if (n.type !== 'hook-auto' && n.type !== 'hook-manual') { return false; }
+      var whenType = n.metadata && n.metadata.whenType;
+      if (whenType !== 'postTaskExecution' && whenType !== 'agentStop') { return false; }
+      return links.some(function(link) {
+        var s = typeof link.source === 'object' ? link.source.id : link.source;
+        var t = typeof link.target === 'object' ? link.target.id : link.target;
+        return s === n.id && qualityIds.has(t);
+      });
+    });
+  }
+
+  /**
+   * Keywords for DML protection detection.
+   */
+  var DML_KEYWORDS_HOOK = [
+    'sql', 'database', 'query', 'insert', 'update', 'delete',
+    'drop', 'truncate', 'alter', 'banco', 'dml', 'migration', 'schema',
+  ];
+
+  var DML_KEYWORDS_STEERING = [
+    'database', 'sql', 'dml', 'migration', 'backup', 'rollback',
+    'transaction', 'production', 'staging', 'environment',
+  ];
+
+  var RISK_KEYWORDS = [
+    'risk', 'danger', 'impact', 'rollback', 'backup', 'production',
+    'warning', 'confirm', 'perigo', 'risco', 'impacto', 'reversível',
+    'irreversível', 'destructive', 'destrutivo',
+  ];
+
+  /**
+   * Check DML protection maturity level.
+   * @param {any[]} nodes
+   * @param {any[]} links
+   * @returns {object} DmlProtectionResult
+   */
+  function checkDmlProtection(nodes, links) {
+    var dmlHooks = findDmlHooks(nodes);
+    var dmlSteerings = findDmlSteerings(nodes);
+    var riskSteerings = findRiskSteerings(dmlSteerings);
+    var hooksWithRiskSteering = findHooksWithRiskSteering(dmlHooks, links, riskSteerings);
+
+    var hasDmlHook = dmlHooks.length > 0;
+    var hasDmlSteering = dmlSteerings.length > 0;
+    var hasRiskIntegration = hooksWithRiskSteering.length > 0;
+
+    var maturityLevel = 0;
+    if (hasDmlHook && hasRiskIntegration) {
+      maturityLevel = 2;
+    } else if (hasDmlHook || hasDmlSteering) {
+      maturityLevel = 1;
+    }
+
+    return {
+      maturityLevel: maturityLevel,
+      dmlHooks: dmlHooks.map(function(n) { return { id: n.id, label: n.label }; }),
+      dmlSteerings: dmlSteerings.map(function(n) { return { id: n.id, label: n.label }; }),
+      riskSteerings: riskSteerings.map(function(n) { return { id: n.id, label: n.label }; }),
+      hooksWithRiskSteering: hooksWithRiskSteering.map(function(n) { return { id: n.id, label: n.label }; }),
+      missing: {
+        needsDmlHook: !hasDmlHook,
+        needsDmlSteering: !hasDmlSteering,
+        needsRiskIntegration: !hasRiskIntegration,
+      },
+    };
+  }
+
+  /**
+   * Find preToolUse hooks with DML keywords.
+   */
+  function findDmlHooks(nodes) {
+    return nodes.filter(function(n) {
+      if (n.type !== 'hook-auto' && n.type !== 'hook-manual') { return false; }
+      var whenType = n.metadata && n.metadata.whenType;
+      if (whenType !== 'preToolUse') { return false; }
+      var desc = ((n.metadata && n.metadata.description) || '').toLowerCase();
+      var label = n.label.toLowerCase();
+      return DML_KEYWORDS_HOOK.some(function(kw) {
+        return desc.indexOf(kw) !== -1 || label.indexOf(kw) !== -1;
+      });
+    });
+  }
+
+  /**
+   * Find steerings with DML protection keywords.
+   */
+  function findDmlSteerings(nodes) {
+    return nodes.filter(function(n) {
+      if (!n.type || n.type.indexOf('steering-') !== 0) { return false; }
+      var keywords = (n.metadata && n.metadata.keywords) || [];
+      var label = n.label.toLowerCase();
+      return DML_KEYWORDS_STEERING.some(function(kw) {
+        return keywords.indexOf(kw) !== -1 || label.indexOf(kw) !== -1;
+      });
+    });
+  }
+
+  /**
+   * Filter DML steerings that also have risk assessment keywords.
+   */
+  function findRiskSteerings(dmlSteerings) {
+    return dmlSteerings.filter(function(n) {
+      var keywords = (n.metadata && n.metadata.keywords) || [];
+      return RISK_KEYWORDS.some(function(kw) {
+        return keywords.indexOf(kw) !== -1;
+      });
+    });
+  }
+
+  /**
+   * Find DML hooks that reference risk-assessment steerings.
+   */
+  function findHooksWithRiskSteering(dmlHooks, links, riskSteerings) {
+    var riskIds = new Set();
+    riskSteerings.forEach(function(n) { riskIds.add(n.id); });
+
+    return dmlHooks.filter(function(hook) {
+      return links.some(function(link) {
+        var s = typeof link.source === 'object' ? link.source.id : link.source;
+        var t = typeof link.target === 'object' ? link.target.id : link.target;
+        return s === hook.id && riskIds.has(t);
+      });
+    });
+  }
+
   /**
    * Compute cognitive analysis from graph data.
    * @param {{ nodes: any[], links: any[] }} data
@@ -304,6 +1004,59 @@ var CognitivePanel = (function () {
       sugestoes.push(steeringsWithoutAccess.length + ' non-always steering(s) are never referenced by hooks — they have instruction but no automated access trigger.');
     }
 
+    // 9. New cognitive assertiveness validations
+    var deadLoops = detectDeadLoops(data.nodes, data.links);
+    var hopsToReach = computeHopsToReach(data.nodes, data.links);
+    var duplicateIntent = detectDuplicateIntent(data.nodes);
+    var passiveKnowledge = detectPassiveKnowledge(data.nodes);
+    var signalToNoise = detectLowSignalToNoise(data.nodes);
+    var contradictions = detectContradictions(data.nodes);
+    var hookCoverageMap = computeHookCoverageMap(data.nodes);
+    var decisionPathCompleteness = checkDecisionPathCompleteness(data.nodes, data.links);
+    var qualityGate = checkQualityGate(data.nodes, data.links);
+    var dmlProtection = checkDmlProtection(data.nodes, data.links);
+
+    // 10. Suggestions for new validations
+    if (deadLoops.length > 0) {
+      sugestoes.push(deadLoops.length + ' dead loop(s) detected — isolated cycles with no external entry. Add an entry point that references at least one node in each cycle.');
+    }
+    if (hopsToReach.length > 0) {
+      sugestoes.push(hopsToReach.length + ' steering(s) are 4+ hops from any entry point. Create direct shortcuts from entry points to reduce navigation depth.');
+    }
+    if (duplicateIntent.length > 0) {
+      sugestoes.push(duplicateIntent.length + ' pair(s) of steerings have >60% keyword overlap. Consolidate them or differentiate their scopes to reduce redundancy.');
+    }
+    if (passiveKnowledge.length > 0) {
+      sugestoes.push(passiveKnowledge.length + ' steering(s) have <10% actionable content. Add imperative instructions (use, always, never, must) to make them actionable.');
+    }
+    if (signalToNoise.length > 0) {
+      sugestoes.push(signalToNoise.length + ' steering(s) have 10-20% actionable content. Condense descriptive text and increase instruction density.');
+    }
+    if (contradictions.length > 0) {
+      sugestoes.push(contradictions.length + ' contradiction(s) detected between always-loaded steerings. Resolve conflicts by unifying rules or defining distinct scopes.');
+    }
+    if (hookCoverageMap.uncovered.length > 0) {
+      sugestoes.push(hookCoverageMap.uncovered.length + ' IDE event(s) have no hooks configured. Evaluate if automation is needed for: ' + hookCoverageMap.uncovered.map(function(e) { return e.event; }).join(', ') + '.');
+    }
+    if (decisionPathCompleteness.hooksWithoutDecisionSteering.length > 0 || decisionPathCompleteness.steeringsWithoutHook.length > 0) {
+      var gaps = decisionPathCompleteness.hooksWithoutDecisionSteering.length + decisionPathCompleteness.steeringsWithoutHook.length;
+      sugestoes.push(gaps + ' decision path gap(s) found. Complete hook\u2192steering chains to give the agent full detect\u2192decide\u2192execute capability.');
+    }
+    if (qualityGate.maturityLevel < 2) {
+      var qgMissing = [];
+      if (qualityGate.missing.needsSelfReview) { qgMissing.push('self-review hook (preToolUse/postToolUse)'); }
+      if (qualityGate.missing.needsQualitySteering) { qgMissing.push('quality gate steering'); }
+      if (qualityGate.missing.needsPostTaskReview) { qgMissing.push('post-task review hook'); }
+      sugestoes.push('Quality Gate at level ' + qualityGate.maturityLevel + '/2. Missing: ' + qgMissing.join(', ') + '.');
+    }
+    if (dmlProtection.maturityLevel < 2) {
+      var dmlMissing = [];
+      if (dmlProtection.missing.needsDmlHook) { dmlMissing.push('preToolUse hook with DML keywords'); }
+      if (dmlProtection.missing.needsDmlSteering) { dmlMissing.push('DML protection steering'); }
+      if (dmlProtection.missing.needsRiskIntegration) { dmlMissing.push('hook\u2192risk-steering integration'); }
+      sugestoes.push('DML Protection at level ' + dmlProtection.maturityLevel + '/2. Missing: ' + dmlMissing.join(', ') + '.');
+    }
+
     return {
       steeringsSoltos: steeringsSoltos,
       vinculosFrageis: vinculosFrageis,
@@ -314,7 +1067,17 @@ var CognitivePanel = (function () {
       totalAlwaysLines: totalAlwaysLines,
       hooksWithoutInstruction: hooksWithoutInstruction,
       steeringsWithoutAccess: steeringsWithoutAccess,
-      sugestoes: sugestoes
+      sugestoes: sugestoes,
+      deadLoops: deadLoops,
+      hopsToReach: hopsToReach,
+      duplicateIntent: duplicateIntent,
+      passiveKnowledge: passiveKnowledge,
+      signalToNoise: signalToNoise,
+      contradictions: contradictions,
+      hookCoverageMap: hookCoverageMap,
+      decisionPathCompleteness: decisionPathCompleteness,
+      qualityGate: qualityGate,
+      dmlProtection: dmlProtection,
     };
   }
 
@@ -452,6 +1215,138 @@ var CognitivePanel = (function () {
           html += '<div style="padding-left:10px;"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + '</a></div>';
         });
       }
+    }
+    html += '</div>';
+
+    // ─── New Cognitive Assertiveness Sections ───
+
+    // Dead Loops
+    html += '<div style="margin-bottom:6px;"><span style="color:#FF5722;font-weight:bold;">Dead Loops</span>';
+    if (!analysis.deadLoops || analysis.deadLoops.length === 0) {
+      html += ' <span style="color:#4CAF50;">0</span>';
+    } else {
+      html += ' <span style="color:#FF5722;">' + analysis.deadLoops.length + '</span>';
+      analysis.deadLoops.slice(0, 3).forEach(function(loop) {
+        html += '<div style="padding-left:6px;color:#888;font-size:9px;">' + loop.size + ' nodes: ' + loop.nodes.map(function(n) { return escapeHtml(n.label); }).join(' \u2192 ') + '</div>';
+      });
+    }
+    html += '</div>';
+
+    // Hops to Reach
+    html += '<div style="margin-bottom:6px;"><span style="color:#FF7043;font-weight:bold;">Hops to Reach</span>';
+    if (!analysis.hopsToReach || analysis.hopsToReach.length === 0) {
+      html += ' <span style="color:#4CAF50;">OK</span>';
+    } else {
+      html += ' <span style="color:#FF7043;">' + analysis.hopsToReach.length + '</span>';
+      analysis.hopsToReach.slice(0, 5).forEach(function(item) {
+        var hopsText = (item.hops >= 999 || item.hops === null || item.hops === undefined) ? '\u221E' : item.hops;
+        html += '<div style="padding-left:6px;"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + ' (' + hopsText + ' hops)</a></div>';
+      });
+    }
+    html += '</div>';
+
+    // Duplicate Intent
+    html += '<div style="margin-bottom:6px;"><span style="color:#AB47BC;font-weight:bold;">Duplicate Intent</span>';
+    if (!analysis.duplicateIntent || analysis.duplicateIntent.length === 0) {
+      html += ' <span style="color:#4CAF50;">0</span>';
+    } else {
+      html += ' <span style="color:#AB47BC;">' + analysis.duplicateIntent.length + '</span>';
+      analysis.duplicateIntent.slice(0, 3).forEach(function(pair) {
+        html += '<div style="padding-left:6px;color:#888;font-size:9px;">' + escapeHtml(pair.nodeA.label) + ' \u2194 ' + escapeHtml(pair.nodeB.label) + ' (' + pair.overlap + '%)</div>';
+      });
+    }
+    html += '</div>';
+
+    // Passive Knowledge
+    html += '<div style="margin-bottom:6px;"><span style="color:#78909C;font-weight:bold;">Passive Knowledge</span>';
+    if (!analysis.passiveKnowledge || analysis.passiveKnowledge.length === 0) {
+      html += ' <span style="color:#4CAF50;">0</span>';
+    } else {
+      html += ' <span style="color:#78909C;">' + analysis.passiveKnowledge.length + '</span>';
+      analysis.passiveKnowledge.slice(0, 5).forEach(function(item) {
+        html += '<div style="padding-left:6px;"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + ' (' + item.actionablePercent + '% actionable)</a></div>';
+      });
+    }
+    html += '</div>';
+
+    // Signal-to-Noise
+    html += '<div style="margin-bottom:6px;"><span style="color:#FFAB40;font-weight:bold;">Signal-to-Noise</span>';
+    if (!analysis.signalToNoise || analysis.signalToNoise.length === 0) {
+      html += ' <span style="color:#4CAF50;">OK</span>';
+    } else {
+      html += ' <span style="color:#FFAB40;">' + analysis.signalToNoise.length + '</span>';
+      analysis.signalToNoise.slice(0, 5).forEach(function(item) {
+        html += '<div style="padding-left:6px;"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + ' (' + item.signalRatio + '% signal)</a></div>';
+      });
+    }
+    html += '</div>';
+
+    // Contradictions
+    html += '<div style="margin-bottom:6px;"><span style="color:#D32F2F;font-weight:bold;">Contradictions</span>';
+    if (!analysis.contradictions || analysis.contradictions.length === 0) {
+      html += ' <span style="color:#4CAF50;">0</span>';
+    } else {
+      html += ' <span style="color:#D32F2F;">' + analysis.contradictions.length + '</span>';
+      analysis.contradictions.slice(0, 3).forEach(function(c) {
+        html += '<div style="padding-left:6px;color:#888;font-size:9px;">' + escapeHtml(c.nodeA.label) + ' vs ' + escapeHtml(c.nodeB.label) + ' (' + escapeHtml(c.conflictType) + ')</div>';
+      });
+    }
+    html += '</div>';
+
+    // Hook Coverage
+    html += '<div style="margin-bottom:6px;"><span style="color:#26A69A;font-weight:bold;">Hook Coverage</span>';
+    if (analysis.hookCoverageMap && analysis.hookCoverageMap.uncovered.length === 0) {
+      html += ' <span style="color:#4CAF50;">10/10</span>';
+    } else if (analysis.hookCoverageMap) {
+      var coveredCount = analysis.hookCoverageMap.covered.length;
+      html += ' <span style="color:#26A69A;">' + coveredCount + '/10</span>';
+      analysis.hookCoverageMap.uncovered.slice(0, 5).forEach(function(item) {
+        html += '<div style="padding-left:6px;color:#888;font-size:9px;">\u2717 ' + escapeHtml(item.event) + '</div>';
+      });
+    }
+    html += '</div>';
+
+    // Decision Path
+    html += '<div style="margin-bottom:6px;"><span style="color:#5C6BC0;font-weight:bold;">Decision Path</span>';
+    if (analysis.decisionPathCompleteness) {
+      var dpGaps = analysis.decisionPathCompleteness.hooksWithoutDecisionSteering.length + analysis.decisionPathCompleteness.steeringsWithoutHook.length;
+      if (dpGaps === 0) {
+        html += ' <span style="color:#4CAF50;">OK</span>';
+      } else {
+        html += ' <span style="color:#5C6BC0;">' + dpGaps + ' gaps</span>';
+        if (analysis.decisionPathCompleteness.hooksWithoutDecisionSteering.length > 0) {
+          html += '<div style="padding-left:6px;color:#888;font-size:9px;font-style:italic;">Hooks without steering:</div>';
+          analysis.decisionPathCompleteness.hooksWithoutDecisionSteering.slice(0, 3).forEach(function(item) {
+            html += '<div style="padding-left:10px;color:#888;font-size:9px;">' + escapeHtml(item.label) + '</div>';
+          });
+        }
+        if (analysis.decisionPathCompleteness.steeringsWithoutHook.length > 0) {
+          html += '<div style="padding-left:6px;color:#888;font-size:9px;font-style:italic;">Steerings without hook:</div>';
+          analysis.decisionPathCompleteness.steeringsWithoutHook.slice(0, 3).forEach(function(item) {
+            html += '<div style="padding-left:10px;color:#888;font-size:9px;">' + escapeHtml(item.label) + '</div>';
+          });
+        }
+      }
+    }
+    html += '</div>';
+
+    // Quality Gate
+    html += '<div style="margin-bottom:6px;"><span style="color:#7E57C2;font-weight:bold;">Quality Gate</span>';
+    if (analysis.qualityGate) {
+      var qgLevel = analysis.qualityGate.maturityLevel;
+      var qgColor = qgLevel === 2 ? '#4CAF50' : qgLevel === 1 ? '#FFC107' : '#F44336';
+      var qgLabel = qgLevel === 2 ? 'Complete' : qgLevel === 1 ? 'Partial' : 'No Gate';
+      html += ' <span style="color:' + qgColor + ';">Level ' + qgLevel + ' (' + qgLabel + ')</span>';
+    }
+    html += '</div>';
+
+    // DML Protection
+    html += '<div style="margin-bottom:6px;"><span style="color:#EF5350;font-weight:bold;">DML Protection</span>';
+    if (analysis.dmlProtection) {
+      var dmlLevel = analysis.dmlProtection.maturityLevel;
+      var dmlColor = dmlLevel === 2 ? '#4CAF50' : dmlLevel === 1 ? '#FFC107' : '#F44336';
+      var dmlLabel = dmlLevel === 2 ? 'Smart' : dmlLevel === 1 ? 'Blind Block' : 'No Protection';
+      html += ' <span style="color:' + dmlColor + ';">Level ' + dmlLevel + ' (' + dmlLabel + ')</span>';
     }
     html += '</div>';
 

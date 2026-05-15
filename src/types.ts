@@ -126,6 +126,17 @@ export interface GraphNode {
     description?: string;
     /** Labels of all steering files referenced by this hook */
     referencedSteerings?: string[];
+
+    // ─── Content analysis fields (populated by ContentAnalyzer) ───
+
+    /** Keywords extracted from content (no stop-words, >= 4 chars) */
+    keywords?: string[];
+    /** Section headers (lines starting with #) */
+    sectionHeaders?: string[];
+    /** Proportion of actionable lines (0.0 - 1.0) */
+    actionableRatio?: number;
+    /** Imperative lines for contradiction detection */
+    imperativeLines?: { text: string; pattern: string; subject: string }[];
   };
 }
 
@@ -264,6 +275,149 @@ export interface CognitiveAnalysisResult {
   steeringsWithoutAccess: { id: string; label: string; inclusion: string }[];
   /** Actionable recommendations */
   sugestoes: string[];
+
+  // ─── New cognitive assertiveness validations ───
+
+  /** Isolated cycles with no external entry */
+  deadLoops: DeadLoop[];
+  /** Steerings far from entry points (>= 4 hops) */
+  hopsToReach: HopAlert[];
+  /** Pairs of steerings with redundant keywords */
+  duplicateIntent: DuplicatePair[];
+  /** Steerings without imperative verbs (< 10% actionable) */
+  passiveKnowledge: PassiveNode[];
+  /** Steerings with low actionable proportion (10-20%) */
+  signalToNoise: SignalNoiseAlert[];
+  /** Contradictions between always-loaded steerings */
+  contradictions: Contradiction[];
+  /** IDE event coverage map */
+  hookCoverageMap: HookCoverageMap;
+  /** Incomplete decision chains */
+  decisionPathCompleteness: DecisionPathResult;
+  /** Quality gate maturity assessment */
+  qualityGate: QualityGateResult;
+  /** DML protection maturity assessment */
+  dmlProtection: DmlProtectionResult;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cognitive Assertiveness Validation Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A detected isolated cycle (dead loop) in the graph */
+export interface DeadLoop {
+  /** Nodes participating in the cycle */
+  nodes: { id: string; label: string }[];
+  /** Number of nodes in the cycle */
+  size: number;
+}
+
+/** A steering node that is too far from entry points */
+export interface HopAlert {
+  /** ID of the distant steering */
+  id: string;
+  /** Label of the steering */
+  label: string;
+  /** Number of hops to the nearest entry point */
+  hops: number;
+}
+
+/** A pair of steerings with redundant keyword overlap */
+export interface DuplicatePair {
+  /** First steering of the pair */
+  nodeA: { id: string; label: string };
+  /** Second steering of the pair */
+  nodeB: { id: string; label: string };
+  /** Overlap percentage (0-100) */
+  overlap: number;
+}
+
+/** A steering with insufficient imperative content */
+export interface PassiveNode {
+  /** ID of the passive steering */
+  id: string;
+  /** Label of the steering */
+  label: string;
+  /** Percentage of actionable lines found */
+  actionablePercent: number;
+}
+
+/** A steering with low signal-to-noise ratio */
+export interface SignalNoiseAlert {
+  /** ID of the steering */
+  id: string;
+  /** Label of the steering */
+  label: string;
+  /** Signal ratio percentage (0-100) */
+  signalRatio: number;
+}
+
+/** A detected contradiction between two steerings */
+export interface Contradiction {
+  /** First steering */
+  nodeA: { id: string; label: string };
+  /** Second steering */
+  nodeB: { id: string; label: string };
+  /** Conflicting snippet from first steering */
+  snippetA: string;
+  /** Conflicting snippet from second steering */
+  snippetB: string;
+  /** Conflict type (e.g. "always vs never") */
+  conflictType: string;
+}
+
+/** Map of IDE event coverage by hooks */
+export interface HookCoverageMap {
+  /** Events with at least one hook */
+  covered: { event: string; hookCount: number }[];
+  /** Events with no hooks */
+  uncovered: { event: string }[];
+}
+
+/** Result of decision path completeness check */
+export interface DecisionPathResult {
+  /** Hooks with no steering reference */
+  hooksWithoutDecisionSteering: { id: string; label: string; gap: string }[];
+  /** Decision steerings without hook trigger */
+  steeringsWithoutHook: { id: string; label: string; gap: string }[];
+}
+
+/** Quality gate maturity assessment result */
+export interface QualityGateResult {
+  /** Maturity level: 0=No Gate, 1=Partial, 2=Complete */
+  maturityLevel: 0 | 1 | 2;
+  /** Self-review hooks found */
+  selfReviewHooks: { id: string; label: string }[];
+  /** Quality gate steerings found */
+  qualitySteerings: { id: string; label: string }[];
+  /** Post-task hooks referencing quality steerings */
+  postTaskReviewHooks: { id: string; label: string }[];
+  /** What is missing to reach level 2 */
+  missing: {
+    needsSelfReview: boolean;
+    needsQualitySteering: boolean;
+    needsPostTaskReview: boolean;
+  };
+}
+
+/** DML protection maturity assessment result */
+export interface DmlProtectionResult {
+  /** Maturity level: 0=No Protection, 1=Blind Block, 2=Smart Protection */
+  maturityLevel: 0 | 1 | 2;
+  /** preToolUse hooks with DML keywords */
+  dmlHooks: { id: string; label: string }[];
+  /** Steerings with database rules */
+  dmlSteerings: { id: string; label: string }[];
+  /** Steerings with risk assessment criteria */
+  riskSteerings: { id: string; label: string }[];
+  /** Hooks referencing risk-assessment steerings */
+  hooksWithRiskSteering: { id: string; label: string }[];
+  /** What is missing to reach level 2 */
+  missing: {
+    needsDmlHook: boolean;
+    needsDmlSteering: boolean;
+    needsRiskIntegration: boolean;
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

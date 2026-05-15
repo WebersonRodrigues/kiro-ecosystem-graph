@@ -2,6 +2,7 @@ import * as path from 'path';
 import type { SteeringFile, EcosystemFile, ParseResult, Reference, GraphNode, NodeType } from '../types';
 import { NodeClassifier } from './nodeClassifier';
 import { PathResolver } from './pathResolver';
+import { analyzeContent } from './contentAnalyzer';
 
 /**
  * Determines whether a target path refers to an ecosystem-relevant file.
@@ -91,6 +92,16 @@ export class ParserService {
       filePath: file.relativePath,
       resolved: true,
       metadata: metadata.inclusion ? { inclusion: metadata.inclusion } : undefined,
+    };
+
+    // Enrich metadata with content analysis metrics
+    const metrics = analyzeContent(content);
+    node.metadata = {
+      ...node.metadata,
+      keywords: metrics.keywords,
+      sectionHeaders: metrics.sectionHeaders,
+      actionableRatio: metrics.actionableRatio,
+      imperativeLines: metrics.imperativeLines,
     };
 
     const references: Reference[] = [];

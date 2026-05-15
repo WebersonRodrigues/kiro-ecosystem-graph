@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.2.1 (2026-05-15)
+
+### Bug Fixes
+
+- **Phantom File Detection** — Fixed parser creating ghost nodes for non-ecosystem files (`.cs`, `.ts`, `.py`) referenced in markdown tables and links. Only `.md`, `.json`, and `.kiro.hook` files now produce graph nodes from table-path and markdown-link references. Wiki-links remain unfiltered (intentional cross-references). Defense-in-depth guard added to GraphDataStore.
+
+### Features
+
+- **10 Advanced Cognitive Assertiveness Validations** — New analysis rules in the Cognitive Panel:
+  1. **Dead Loops** — Detects isolated cycles with no external entry (Tarjan SCC)
+  2. **Hops to Reach** — Alerts steerings 4+ hops from any entry point (BFS)
+  3. **Duplicate Intent** — Detects >60% keyword overlap between always-loaded steerings (Jaccard)
+  4. **Passive Knowledge** — Flags steerings with <10% actionable content
+  5. **Signal-to-Noise** — Flags steerings with 10-20% actionable content
+  6. **Contradictions** — Detects opposing rules between always-loaded steerings
+  7. **Hook Coverage Map** — Shows which IDE events have hooks and which don't
+  8. **Decision Path** — Verifies hook→steering chain completeness
+  9. **Quality Gate** — Maturity score (0/1/2) for self-review and subagent review mechanisms
+  10. **DML Protection** — Maturity score (0/1/2) for database operation safeguards
+
+- **Content Analyzer** — New extension host service that extracts keywords, actionable ratio, imperative lines, and section headers from steerings during parsing. Results power the content-based validations.
+
+- **Enhanced Markdown Export** — All 10 new validations included in the exported cognitive analysis report with dedicated sections, tables, and AI instructions.
+
 ## 0.2.0 (2026-05-14)
 
 ### Features
