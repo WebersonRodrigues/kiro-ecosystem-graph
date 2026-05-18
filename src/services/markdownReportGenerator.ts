@@ -46,6 +46,7 @@ export function generateCognitiveReport(
   appendCircularHookDependencies(lines, data);
   appendGuardrailSuggestions(lines, data);
   appendInstructionSpecificity(lines, data);
+  appendContextBudget(lines, data);
   appendRecommendations(lines, data);
   appendInstructionsForAI(lines, data);
 
@@ -512,6 +513,36 @@ function appendInstructionSpecificity(lines: string[], data: CognitiveAnalysisRe
     lines.push(`| ${alert.label} | ${alert.score}% | ${alert.vagueCount} | ${examples} |`);
   }
   lines.push('');
+}
+
+function appendContextBudget(lines: string[], data: CognitiveAnalysisResult): void {
+  if (!data.contextBudget) { return; }
+  const cb = data.contextBudget;
+
+  lines.push('## Context Budget');
+  lines.push('');
+  lines.push('> This is informational only. It does not affect the Health Score.');
+  lines.push('');
+
+  if (cb.perSteering.length === 0) {
+    lines.push('No always-loaded steerings detected.');
+    lines.push('');
+    return;
+  }
+
+  lines.push(`Estimated context consumption: ${cb.totalTokens} tokens (${cb.budgetPercent}% of ${cb.maxBudget} budget)`);
+  lines.push('');
+  lines.push('| Steering | Tokens | % of Budget |');
+  lines.push('|----------|--------|-------------|');
+  for (const entry of cb.perSteering) {
+    lines.push(`| ${entry.label} | ${entry.tokens} | ${entry.percent}% |`);
+  }
+  lines.push('');
+
+  if (cb.suggestion) {
+    lines.push(`> ${cb.suggestion}`);
+    lines.push('');
+  }
 }
 
 function appendRecommendations(lines: string[], data: CognitiveAnalysisResult): void {

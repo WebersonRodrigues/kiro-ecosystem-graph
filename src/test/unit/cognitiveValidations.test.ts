@@ -1316,3 +1316,194 @@ describe('CognitiveValidations — analyzeInstructionSpecificity()', function ()
     assert.strictEqual(result.averageScore, 100);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Context Budget Estimator (Rule 25)
+// ─────────────────────────────────────────────────────────────────────────────
+
+import {
+  estimateTokenCount,
+  estimateContextBudget,
+  DEFAULT_MAX_BUDGET,
+  BUDGET_ALERT_THRESHOLD,
+} from '../../services/cognitiveValidations';
+
+describe('CognitiveValidations — estimateTokenCount()', function () {
+  it('"hello world" → Math.ceil(2 * 1.3) = 3', function () {
+    assert.strictEqual(estimateTokenCount('hello world'), 3);
+  });
+
+  it('empty string → 0', function () {
+    assert.strictEqual(estimateTokenCount(''), 0);
+  });
+
+  it('string with only whitespace → 0', function () {
+    assert.strictEqual(estimateTokenCount('   \t\n  '), 0);
+  });
+
+  it('multiple spaces between words → counts words correctly', function () {
+    assert.strictEqual(estimateTokenCount('a   b   c'), Math.ceil(3 * 1.3));
+  });
+
+  it('100 words → Math.ceil(100 * 1.3) = 130', function () {
+    const content = Array(100).fill('word').join(' ');
+    assert.strictEqual(estimateTokenCount(content), 130);
+  });
+});
+
+describe('CognitiveValidations — estimateContextBudget()', function () {
+  it('0 always-loaded steerings → totalTokens=0, budgetPercent=0, perSteering=[]', function () {
+    const nodes: GraphNode[] = [
+      makeNode('a.md', { type: 'steering-domain', metadata: { inclusion: 'always' } }),
+    ];
+    const result = estimateContextBudget(nodes);
+    assert.strictEqual(result.totalTokens, 0);
+    assert.strictEqual(result.budgetPercent, 0);
+    assert.strictEqual(result.perSteering.length, 0);
+    assert.strictEqual(result.suggestion, undefined);
+  });
+
+  it('1 always-loaded steering → correct totalTokens and perSteering.length=1', function () {
+    const nodes: GraphNode[] = [
+      makeNode('a.md', {
+        type: 'steering-domain',
+        metadata: { alwaysApply: true, content: 'hello world' },
+      }),
+    ];
+    const result = estimateContextBudget(nodes);
+    assert.strictEqual(result.perSteering.length, 1);
+    assert.strictEqual(result.totalTokens, 3); // ceil(2 * 1.3)
+    assert.strictEqual(result.perSteering[0].tokens, 3);
+  });
+
+  it('multiple steerings → totalTokens = sum of individual tokens', function () {
+    const nodes: GraphNode[] = [
+      makeNode('a.md', {
+        type: 'steering-domain',
+        metadata: { alwaysApply: true, content: 'hello world' },
+      }),
+      makeNode('b.md', {
+        type: 'steering-tech',
+        metadata: { autoInclusion: true, content: 'one two three' },
+      }),
+    ];
+    const result = estimateContextBudget(nodes);
+    const expectedA = Math.ceil(2 * 1.3);
+    const expectedB = Math.ceil(3 * 1.3);
+    assert.strictEqual(result.totalTokens, expectedA + expectedB);
+    assert.strictEqual(result.perSteering.length, 2);
+  });
+
+  it('budgetPercent=15 → no suggestion', function () {
+    // 15% of 200000 = 30000 tokens
+    // Need 30000 tokens → 30000 / 1.3 ≈ 23077 words
+    const words = Array(23077).fill('w').join(' ');
+    const nodes: GraphNode[] = [
+      makeNode('big.md', {
+        type: 'steering-domain',
+        metadata: { alwaysApply: true, content: words },
+      }),
+    ];
+    const result = estimateContextBudget(nodes);
+    assert.ok(result.budgetPercent <= 15);
+    assert.strictEqual(result.suggestion, undefined);
+  });
+
+  it('budgetPercent=16 → suggestion generated', function () {
+    // Use custom maxBudget to make it easier
+    const words = Array(100).fill('word').join(' ');
+    const nodes: GraphNode[] = [
+      makeNode('big.md', {
+        type: 'steering-domain',
+        metadata: { alwaysApply: true, content: words },
+      }),
+    ];
+    // 130 tokens / 800 budget = 16.25%
+    const result = estimateContextBudget(nodes, 800);
+    assert.ok(result.budgetPercent > 15);
+    assert.ok(result.suggestion !== undefined);
+    assert.ok(result.suggestion!.includes('Consider reviewing'));
+  });
+
+  it('custom maxBudget is respected', function () {
+    const nodes: GraphNode[] = [
+      makeNode('a.md', {
+        type: 'steering-domain',
+        metadata: { alwaysApply: true, content: 'hello world' },
+      }),
+    ];
+    const result = estimateContextBudget(nodes, 100000);
+    assert.strictEqual(result.maxBudget, 100000);
+  });
+
+  it('non-steering nodes are ignored (hooks, skills)', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook.json', {
+        type: 'hook-auto',
+        metadata: { alwaysApply: true, content: 'lots of content here' },
+      }),
+      makeNode('skill.md', {
+        type: 'skill' as NodeType,
+        metadata: { alwaysApply: true, content: 'skill content' },
+      }),
+    ];
+    const result = estimateContextBudget(nodes);
+    assert.strictEqual(result.totalTokens, 0);
+    assert.strictEqual(result.perSteering.length, 0);
+  });
+
+  it('steerings without alwaysApply/autoInclusion are ignored', function () {
+    const nodes: GraphNode[] = [
+      makeNode('a.md', {
+        type: 'steering-domain',
+        metadata: { inclusion: 'always', content: 'hello world' },
+      }),
+      makeNode('b.md', {
+        type: 'steering-tech',
+        metadata: { content: 'some content here' },
+      }),
+    ];
+    const result = estimateContextBudget(nodes);
+    assert.strictEqual(result.totalTokens, 0);
+    assert.strictEqual(result.perSteering.length, 0);
+  });
+
+  it('content fallback: metadata.content → imperativeLines → label', function () {
+    // Uses imperativeLines when content is absent
+    const nodes: GraphNode[] = [
+      makeNode('a.md', {
+        type: 'steering-domain',
+        metadata: {
+          alwaysApply: true,
+          imperativeLines: [
+            { text: 'use typescript', pattern: 'use', subject: 'typescript' },
+            { text: 'always test', pattern: 'always', subject: 'test' },
+          ],
+        },
+      }),
+    ];
+    const result = estimateContextBudget(nodes);
+    // "use typescript always test" → 4 words → ceil(4 * 1.3) = 6
+    assert.strictEqual(result.perSteering[0].tokens, 6);
+
+    // Uses label when both content and imperativeLines are absent
+    const nodes2: GraphNode[] = [
+      makeNode('my-steering.md', {
+        type: 'steering-domain',
+        label: 'my-steering',
+        metadata: { alwaysApply: true },
+      }),
+    ];
+    const result2 = estimateContextBudget(nodes2);
+    // "my-steering" → 1 word → ceil(1 * 1.3) = 2
+    assert.strictEqual(result2.perSteering[0].tokens, 2);
+  });
+
+  it('DEFAULT_MAX_BUDGET is 200000', function () {
+    assert.strictEqual(DEFAULT_MAX_BUDGET, 200000);
+  });
+
+  it('BUDGET_ALERT_THRESHOLD is 0.15', function () {
+    assert.strictEqual(BUDGET_ALERT_THRESHOLD, 0.15);
+  });
+});

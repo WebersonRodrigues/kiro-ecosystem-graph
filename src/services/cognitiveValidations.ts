@@ -29,6 +29,8 @@ import type {
   GuardrailCoverageResult,
   InstructionSpecificityAlert,
   InstructionSpecificityResult,
+  ContextBudgetResult,
+  ContextBudgetSteeringEntry,
 } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1761,5 +1763,80 @@ function buildSpecificityAlert(
     specificCount: lines.length - vagueLines.length,
     vagueExamples: vagueLines.slice(0, 3).map((l) => l.text),
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Context Budget Estimator (Rule 25)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Default maximum context budget in tokens */
+export const DEFAULT_MAX_BUDGET = 200000;
+
+/** Threshold above which a suggestion is generated (15%) */
+export const BUDGET_ALERT_THRESHOLD = 0.15;
+
+/**
+ * Estimates the token count for a given content string.
+ * Uses heuristic: Math.ceil(wordCount * 1.3).
+ * Returns 0 for empty or whitespace-only strings.
+ */
+export function estimateTokenCount(content: string): number {
+  if (!content) { return 0; }
+  const words = content.split(/\s+/).filter((w) => w.length > 0);
+  if (words.length === 0) { return 0; }
+  return Math.ceil(words.length * 1.3);
+}
+
+/**
+ * Checks if a node is an always-loaded steering.
+ * A steering is always-loaded when its type starts with 'steering-'
+ * AND metadata.alwaysApply === true OR metadata.autoInclusion === true.
+ */
+function isAlwaysLoadedSteering(node: GraphNode): boolean {
+  if (!node.type || !node.type.startsWith('steering-')) { return false; }
+  const meta = node.metadata;
+  if (!meta) { return false; }
+  return meta.alwaysApply === true || meta.autoInclusion === true;
+}
+
+/**
+ * Extracts content from a steering node for token estimation.
+ * Priority: metadata.content → imperativeLines joined → label.
+ */
+function getSteeringContent(node: GraphNode): string {
+  const meta = node.metadata;
+  if (meta?.content) { return meta.content as string; }
+  if (meta?.imperativeLines && meta.imperativeLines.length > 0) {
+    return meta.imperativeLines.map((l) => l.text).join(' ');
+  }
+  return node.label || '';
+}
+
+/**
+ * Estimates the context budget consumption by always-loaded steerings.
+ * Returns a complete breakdown with per-steering tokens and a suggestion
+ * when consumption exceeds 15% of the budget.
+ */
+export function estimateContextBudget(
+  nodes: GraphNode[],
+  maxBudget: number = DEFAULT_MAX_BUDGET,
+): ContextBudgetResult {
+  const alwaysSteerings = nodes.filter(isAlwaysLoadedSteering);
+
+  const perSteering: ContextBudgetSteeringEntry[] = alwaysSteerings.map((node) => {
+    const content = getSteeringContent(node);
+    const tokens = estimateTokenCount(content);
+    const percent = Math.round((tokens / maxBudget) * 100);
+    return { id: node.id, label: node.label, tokens, percent };
+  });
+
+  const totalTokens = perSteering.reduce((sum, s) => sum + s.tokens, 0);
+  const budgetPercent = Math.round((totalTokens / maxBudget) * 100);
+
+  const suggestion = budgetPercent > 15
+    ? `Consider reviewing always-loaded steerings — they consume ${budgetPercent}% of the estimated context budget.`
+    : undefined;
+
+  return { totalTokens, budgetPercent, maxBudget, perSteering, suggestion };
 }
 

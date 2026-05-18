@@ -604,3 +604,46 @@ code-conventions.md (steering-domain)
 - Replace "ensure quality" with "run `npm test` and verify 80% coverage"
 - Replace "handle errors properly" with "wrap in try/catch and log to stderr with stack trace"
 - Add technology names, file paths, code examples, or measurable thresholds to every instruction
+
+
+---
+
+### 25. Context Window Budget Estimator (Informational)
+
+**What it checks:** Estimates how many tokens always-loaded steerings consume from the AI agent's context window budget. Uses the heuristic `tokens ≈ words × 1.3` to approximate BPE tokenization.
+
+**Why it matters:** Always-loaded steerings are injected into every agent interaction. If they collectively consume a large portion of the context window, less space remains for the agent's reasoning, user messages, and tool outputs. Visibility into this consumption helps maintainers make informed decisions about steering size and inclusion mode.
+
+**Algorithm:**
+1. Identify steerings with `alwaysApply: true` or `autoInclusion: true` in metadata
+2. For each, estimate tokens: `Math.ceil(content.split(/\s+/).filter(w => w.length > 0).length * 1.3)`
+3. Sum all per-steering tokens to get `totalTokens`
+4. Compute `budgetPercent = Math.round((totalTokens / maxBudget) * 100)` where maxBudget defaults to 200,000
+5. Generate suggestion when budgetPercent > 15%
+
+**Content source priority:**
+1. `metadata.content` (full file content if available)
+2. `metadata.imperativeLines` joined (extracted imperative lines)
+3. `node.label` (filename as minimal fallback)
+
+**Example:**
+```
+project-overview.md (alwaysApply: true, 800 words)  →  ~1040 tokens
+code-conventions.md (alwaysApply: true, 200 words)  →  ~260 tokens
+Total: 1300 tokens (1% of 200000 budget)  →  OK, no suggestion
+```
+
+```
+large-context.md (alwaysApply: true, 25000 words)  →  ~32500 tokens
+Total: 32500 tokens (16% of 200000 budget)  →  SUGGESTION generated
+```
+
+**Important:** This rule is INFORMATIONAL ONLY. It does NOT affect the Health Score. Results are framed as suggestions, never as errors or warnings.
+
+**Impact:** Without visibility, maintainers may unknowingly fill the context window with always-loaded content, leaving insufficient space for the agent to reason effectively.
+
+**How to optimize:**
+- Move large steerings to `inclusion: auto` or `inclusion: fileMatch` so they load on demand
+- Split large always-loaded steerings into smaller focused files
+- Remove redundant content from always-loaded steerings
+- Use the per-steering breakdown to identify the largest consumers

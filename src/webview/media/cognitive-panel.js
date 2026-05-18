@@ -1248,6 +1248,69 @@ var CognitivePanel = (function () {
     return { alerts: alerts, averageScore: averageScore };
   }
 
+  // ─── Context Budget Estimator (Rule 25) ────────────────────────────────
+
+  var DEFAULT_MAX_BUDGET_WV = 200000;
+
+  /**
+   * Estimates token count for a content string.
+   * Heuristic: Math.ceil(wordCount * 1.3).
+   */
+  function estimateTokenCountWebview(content) {
+    if (!content) { return 0; }
+    var words = content.split(/\s+/).filter(function(w) { return w.length > 0; });
+    if (words.length === 0) { return 0; }
+    return Math.ceil(words.length * 1.3);
+  }
+
+  /**
+   * Checks if a node is an always-loaded steering.
+   */
+  function isAlwaysLoadedSteeringWebview(node) {
+    if (!node.type || node.type.indexOf('steering-') !== 0) { return false; }
+    var meta = node.metadata;
+    if (!meta) { return false; }
+    return meta.alwaysApply === true || meta.autoInclusion === true;
+  }
+
+  /**
+   * Extracts content from a steering node for token estimation.
+   */
+  function getSteeringContentWebview(node) {
+    var meta = node.metadata;
+    if (meta && meta.content) { return meta.content; }
+    if (meta && meta.imperativeLines && meta.imperativeLines.length > 0) {
+      return meta.imperativeLines.map(function(l) { return l.text; }).join(' ');
+    }
+    return node.label || '';
+  }
+
+  /**
+   * Estimates context budget consumption by always-loaded steerings.
+   * @param {any[]} nodes
+   * @returns {{ totalTokens: number, budgetPercent: number, maxBudget: number, perSteering: Array, suggestion?: string }}
+   */
+  function estimateContextBudgetWebview(nodes) {
+    var maxBudget = DEFAULT_MAX_BUDGET_WV;
+    var alwaysSteerings = nodes.filter(isAlwaysLoadedSteeringWebview);
+
+    var perSteering = alwaysSteerings.map(function(node) {
+      var content = getSteeringContentWebview(node);
+      var tokens = estimateTokenCountWebview(content);
+      var percent = Math.round((tokens / maxBudget) * 100);
+      return { id: node.id, label: node.label, tokens: tokens, percent: percent };
+    });
+
+    var totalTokens = perSteering.reduce(function(sum, s) { return sum + s.tokens; }, 0);
+    var budgetPercent = Math.round((totalTokens / maxBudget) * 100);
+
+    var suggestion = budgetPercent > 15
+      ? 'Consider reviewing always-loaded steerings \u2014 they consume ' + budgetPercent + '% of the estimated context budget.'
+      : undefined;
+
+    return { totalTokens: totalTokens, budgetPercent: budgetPercent, maxBudget: maxBudget, perSteering: perSteering, suggestion: suggestion };
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Health Score Computation
   // ─────────────────────────────────────────────────────────────────────────
@@ -1546,6 +1609,9 @@ var CognitivePanel = (function () {
     // 17. Instruction Specificity Score (Rule 24)
     var instructionSpecificity = analyzeInstructionSpecificityWebview(data.nodes);
 
+    // 18. Context Budget Estimator (Rule 25)
+    var contextBudget = estimateContextBudgetWebview(data.nodes);
+
     // 11. Cross-Workspace Topology: group external nodes by workspace
     var crossWorkspaceTopology = [];
     var workspaceGroups = {};
@@ -1648,6 +1714,7 @@ var CognitivePanel = (function () {
       circularHookDependencies: circularHookDependencies,
       guardrailCoverage: guardrailCoverage,
       instructionSpecificity: instructionSpecificity,
+      contextBudget: contextBudget,
       healthScore: computeHealthScore({
         steeringsSoltos: steeringsSoltos,
         vinculosFrageis: vinculosFrageis,
@@ -2305,6 +2372,30 @@ var CognitivePanel = (function () {
         }
         html += '</div>';
       });
+      html += '</div>';
+    }
+
+    // Context Budget (Rule 25)
+    if (analysis.contextBudget) {
+      var cb = analysis.contextBudget;
+      var barColor = cb.budgetPercent <= 15 ? '#4CAF50' : cb.budgetPercent <= 30 ? '#FFC107' : '#F44336';
+      var barWidth = Math.min(cb.budgetPercent, 100);
+      html += '<div style="margin-bottom:6px;border-top:1px solid #333;padding-top:6px;">';
+      html += '<span style="color:#90A4AE;font-weight:bold;">\uD83D\uDCCA Context Budget</span>';
+      html += '<div style="margin:3px 0;background:#333;border-radius:3px;height:6px;overflow:hidden;">';
+      html += '<div style="width:' + barWidth + '%;height:100%;background:' + barColor + ';border-radius:3px;"></div>';
+      html += '</div>';
+      if (cb.perSteering.length === 0) {
+        html += '<div style="padding-left:6px;color:#666;font-size:9px;">No always-loaded steerings found</div>';
+      } else {
+        html += '<div style="padding-left:6px;color:#B0BEC5;font-size:9px;">' + cb.totalTokens + ' tokens (' + cb.budgetPercent + '% of ' + cb.maxBudget + ')</div>';
+        cb.perSteering.forEach(function(s) {
+          html += '<div style="padding-left:10px;color:#78909C;font-size:8px;">\u2022 ' + escapeHtml(s.label) + ': ' + s.tokens + ' tokens (' + s.percent + '%)</div>';
+        });
+      }
+      if (cb.suggestion) {
+        html += '<div style="padding-left:6px;color:#FFC107;font-size:8px;margin-top:2px;">\u26A0 ' + escapeHtml(cb.suggestion) + '</div>';
+      }
       html += '</div>';
     }
 

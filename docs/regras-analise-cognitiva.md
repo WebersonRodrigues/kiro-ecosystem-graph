@@ -605,3 +605,46 @@ code-conventions.md (steering-domain)
 - Substitua "ensure quality" por "run `npm test` and verify 80% coverage"
 - Substitua "handle errors properly" por "wrap in try/catch and log to stderr with stack trace"
 - Adicione nomes de tecnologia, paths de arquivo, exemplos de código ou thresholds mensuráveis a cada instrução
+
+
+---
+
+### 25. Context Window Budget Estimator (Informacional)
+
+**O que verifica:** Estima quantos tokens os steerings always-loaded consomem do budget da janela de contexto do agente AI. Usa a heurística `tokens ≈ palavras × 1.3` para aproximar a tokenização BPE.
+
+**Por que importa:** Steerings always-loaded são injetados em toda interação com o agente. Se coletivamente consumirem uma grande porção da janela de contexto, sobra menos espaço para o raciocínio do agente, mensagens do usuário e outputs de ferramentas. Visibilidade sobre esse consumo ajuda mantenedores a tomar decisões informadas sobre tamanho e modo de inclusão dos steerings.
+
+**Algoritmo:**
+1. Identificar steerings com `alwaysApply: true` ou `autoInclusion: true` no metadata
+2. Para cada um, estimar tokens: `Math.ceil(content.split(/\s+/).filter(w => w.length > 0).length * 1.3)`
+3. Somar todos os tokens por steering para obter `totalTokens`
+4. Calcular `budgetPercent = Math.round((totalTokens / maxBudget) * 100)` onde maxBudget padrão é 200.000
+5. Gerar sugestão quando budgetPercent > 15%
+
+**Prioridade de fonte de conteúdo:**
+1. `metadata.content` (conteúdo completo do arquivo se disponível)
+2. `metadata.imperativeLines` concatenadas (linhas imperativas extraídas)
+3. `node.label` (nome do arquivo como fallback mínimo)
+
+**Exemplo:**
+```
+project-overview.md (alwaysApply: true, 800 palavras)  →  ~1040 tokens
+code-conventions.md (alwaysApply: true, 200 palavras)  →  ~260 tokens
+Total: 1300 tokens (1% de 200000 budget)  →  OK, sem sugestão
+```
+
+```
+large-context.md (alwaysApply: true, 25000 palavras)  →  ~32500 tokens
+Total: 32500 tokens (16% de 200000 budget)  →  SUGESTÃO gerada
+```
+
+**Importante:** Esta regra é APENAS INFORMACIONAL. NÃO afeta o Health Score. Resultados são apresentados como sugestões, nunca como erros ou warnings.
+
+**Impacto:** Sem visibilidade, mantenedores podem inadvertidamente preencher a janela de contexto com conteúdo always-loaded, deixando espaço insuficiente para o agente raciocinar efetivamente.
+
+**Como otimizar:**
+- Mova steerings grandes para `inclusion: auto` ou `inclusion: fileMatch` para carregar sob demanda
+- Divida steerings always-loaded grandes em arquivos menores e focados
+- Remova conteúdo redundante de steerings always-loaded
+- Use o breakdown por steering para identificar os maiores consumidores

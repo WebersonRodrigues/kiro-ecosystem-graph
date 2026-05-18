@@ -587,3 +587,73 @@ describe('MarkdownReportGenerator', function () {
       assert.ok(report.includes('Consider making vague instructions more specific'));
     });
   });
+
+  describe('Context Budget section', function () {
+    it('generates Context Budget section with valid data', function () {
+      const data = createMinimalResult();
+      data.contextBudget = {
+        totalTokens: 5000,
+        budgetPercent: 3,
+        maxBudget: 200000,
+        perSteering: [
+          { id: 'a.md', label: 'a', tokens: 3000, percent: 2 },
+          { id: 'b.md', label: 'b', tokens: 2000, percent: 1 },
+        ],
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('## Context Budget'));
+      assert.ok(report.includes('5000 tokens (3% of 200000 budget)'));
+      assert.ok(report.includes('| a | 3000 | 2% |'));
+      assert.ok(report.includes('| b | 2000 | 1% |'));
+      assert.ok(report.includes('| Steering | Tokens | % of Budget |'));
+    });
+
+    it('omits section when contextBudget is undefined', function () {
+      const data = createMinimalResult();
+      const report = generateCognitiveReport(data);
+      assert.ok(!report.includes('## Context Budget'));
+    });
+
+    it('displays "No always-loaded steerings detected." when perSteering is empty', function () {
+      const data = createMinimalResult();
+      data.contextBudget = {
+        totalTokens: 0,
+        budgetPercent: 0,
+        maxBudget: 200000,
+        perSteering: [],
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('## Context Budget'));
+      assert.ok(report.includes('No always-loaded steerings detected.'));
+      assert.ok(!report.includes('| Steering |'));
+    });
+
+    it('informational note is present in header', function () {
+      const data = createMinimalResult();
+      data.contextBudget = {
+        totalTokens: 100,
+        budgetPercent: 0,
+        maxBudget: 200000,
+        perSteering: [{ id: 'x.md', label: 'x', tokens: 100, percent: 0 }],
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('This is informational only. It does not affect the Health Score.'));
+    });
+
+    it('includes suggestion when budgetPercent > 15', function () {
+      const data = createMinimalResult();
+      data.contextBudget = {
+        totalTokens: 40000,
+        budgetPercent: 20,
+        maxBudget: 200000,
+        perSteering: [{ id: 'big.md', label: 'big', tokens: 40000, percent: 20 }],
+        suggestion: 'Consider reviewing always-loaded steerings — they consume 20% of the estimated context budget.',
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('Consider reviewing always-loaded steerings'));
+    });
+  });

@@ -210,6 +210,15 @@ export interface GraphNode {
     actionableRatio?: number;
     /** Imperative lines for contradiction detection */
     imperativeLines?: { text: string; pattern: string; subject: string }[];
+
+    // ─── Context Budget fields (populated for always-loaded steerings) ───
+
+    /** Whether this steering is always applied (always-loaded) */
+    alwaysApply?: boolean;
+    /** Whether this steering uses auto-inclusion */
+    autoInclusion?: boolean;
+    /** Full content of the steering file (for token estimation) */
+    content?: string;
   };
 }
 
@@ -407,6 +416,9 @@ export interface CognitiveAnalysisResult {
 
   /** Instruction specificity analysis — improvement suggestions (Rule 24) */
   instructionSpecificity?: InstructionSpecificityResult;
+
+  /** Context budget estimation — informational only (Rule 25) */
+  contextBudget?: ContextBudgetResult;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -873,4 +885,34 @@ export interface GraphSnapshot {
   nodes: GraphNode[];
   /** All edges at the time of snapshot */
   edges: GraphEdge[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Context Budget Estimator Types (Rule 25)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Per-steering token estimation entry */
+export interface ContextBudgetSteeringEntry {
+  /** Steering node id */
+  id: string;
+  /** Steering label */
+  label: string;
+  /** Estimated token count */
+  tokens: number;
+  /** Percentage of total budget consumed by this steering */
+  percent: number;
+}
+
+/** Complete context budget estimation result */
+export interface ContextBudgetResult {
+  /** Total estimated tokens consumed by all always-loaded steerings */
+  totalTokens: number;
+  /** Percentage of maxBudget consumed (0-100+) */
+  budgetPercent: number;
+  /** Maximum budget in tokens (configurable, default 200000) */
+  maxBudget: number;
+  /** Per-steering breakdown */
+  perSteering: ContextBudgetSteeringEntry[];
+  /** Suggestion text when consumption > 15% threshold */
+  suggestion?: string;
 }
