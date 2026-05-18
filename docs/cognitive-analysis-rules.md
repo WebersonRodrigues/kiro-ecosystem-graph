@@ -752,3 +752,54 @@ No priority language found in any steering
 - Define a clear hierarchy: security > conventions > style
 - Use explicit language: "has priority over", "takes precedence", "overrides"
 
+
+---
+
+### 28. Feedback Loop Completeness (Improvement Suggestions)
+
+**What it checks:** Whether hooks in the ecosystem have complete feedback loops with all 4 components: Detection → Decision → Action → Verification. Identifies hooks with incomplete cycles and suggests improvements.
+
+**Why it matters:** A complete feedback loop ensures the AI agent can detect an event, decide what to do based on criteria, take action with clear instructions, and verify the outcome. Incomplete loops mean the agent operates without full coverage — it might detect but not verify, or act without decision criteria.
+
+**Components:**
+
+| Component | What it means | How it's detected |
+|-----------|---------------|-------------------|
+| Detection | The hook triggers on an event | Always true (every hook IS a detection mechanism) |
+| Decision | The hook references a steering with criteria | Hook has an edge to a steering node |
+| Action | The hook has clear instructions | Hook prompt contains >= 20 words |
+| Verification | Another hook validates the outcome | A postTaskExecution/postToolUse hook references the same steering |
+
+**Classification:**
+
+| Component Count | Classification | Behavior |
+|----------------|----------------|----------|
+| 4 (all) | Complete loop | Counted in `completeLoops` |
+| 3 | Acceptable | Not flagged (good enough) |
+| 1-2 | Incomplete | Flagged in `incompleteLoops` with missing components |
+
+**Example:**
+```
+hook "code-review" (preToolUse)
+  ✅ Detection: triggers on preToolUse
+  ✅ Decision: references code-conventions.md
+  ✅ Action: prompt has 35 words with clear instructions
+  ✅ Verification: hook "post-review" (postTaskExecution) references code-conventions.md
+  → COMPLETE LOOP (4/4)
+
+hook "auto-format" (fileEdited)
+  ✅ Detection: triggers on fileEdited
+  ❌ Decision: no steering reference
+  ❌ Action: prompt has 5 words ("format the file")
+  ❌ Verification: no post-hook references same steering
+  → INCOMPLETE (1/4) — missing: Decision, Action, Verification
+```
+
+**Important:** This rule produces SUGGESTIONS only, not errors. Results do NOT affect the Health Score.
+
+**Impact:** Incomplete feedback loops mean the agent operates with gaps — it might detect events but act without criteria, or take action without verification. Complete loops create a robust automation cycle.
+
+**How to improve:**
+1. For missing Decision: Add a steering reference to the hook (link to a steering with decision criteria)
+2. For missing Action: Expand the hook prompt to >= 20 words with clear imperative instructions
+3. For missing Verification: Create a postTaskExecution or postToolUse hook that references the same steering

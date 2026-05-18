@@ -1489,6 +1489,83 @@ var CognitivePanel = (function () {
     return { hasPriorityDefined: hasPriorityDefined, priorityStatements: statements, suggestion: suggestion };
   }
 
+  // ─── Feedback Loop Completeness (Rule 28) ──────────────────────────────
+
+  var FL_MIN_ACTION_WORD_COUNT = 20;
+  var FL_MIN_COMPONENTS_TO_FLAG = 3;
+  var FL_POST_EVENT_TYPES = ['postTaskExecution', 'postToolUse'];
+
+  function getConnectedSteeringIdsWebview(nodeId, nodes, links) {
+    var ids = [];
+    for (var i = 0; i < links.length; i++) {
+      var s = typeof links[i].source === 'object' ? links[i].source.id : links[i].source;
+      var t = typeof links[i].target === 'object' ? links[i].target.id : links[i].target;
+      var otherId = s === nodeId ? t : (t === nodeId ? s : null);
+      if (!otherId) { continue; }
+      var otherNode = nodes.find(function(n) { return n.id === otherId; });
+      if (otherNode && otherNode.type && otherNode.type.indexOf('steering-') === 0) {
+        ids.push(otherId);
+      }
+    }
+    return ids;
+  }
+
+  function analyzeFeedbackLoopsWebview(nodes, links) {
+    var hooks = nodes.filter(function(n) {
+      return n.type === 'hook-auto' || n.type === 'hook-manual';
+    });
+    var completeLoops = 0;
+    var incompleteLoops = [];
+
+    for (var i = 0; i < hooks.length; i++) {
+      var hook = hooks[i];
+      var decision = getConnectedSteeringIdsWebview(hook.id, nodes, links).length > 0;
+      var prompt = (hook.metadata && hook.metadata.hookPrompt) || (hook.metadata && hook.metadata.description) || '';
+      var words = prompt.split(/\s+/).filter(function(w) { return w.length > 0; });
+      var action = words.length >= FL_MIN_ACTION_WORD_COUNT;
+      var verification = false;
+      var connSteerings = getConnectedSteeringIdsWebview(hook.id, nodes, links);
+      if (connSteerings.length > 0) {
+        var postHooks = nodes.filter(function(n) {
+          return (n.type === 'hook-auto' || n.type === 'hook-manual') &&
+            n.id !== hook.id &&
+            FL_POST_EVENT_TYPES.indexOf(n.metadata && n.metadata.whenType) !== -1;
+        });
+        for (var p = 0; p < postHooks.length; p++) {
+          var postSteerings = getConnectedSteeringIdsWebview(postHooks[p].id, nodes, links);
+          var hasShared = connSteerings.some(function(s) { return postSteerings.indexOf(s) !== -1; });
+          if (hasShared) { verification = true; break; }
+        }
+      }
+      var count = 1 + (decision ? 1 : 0) + (action ? 1 : 0) + (verification ? 1 : 0);
+      if (count === 4) {
+        completeLoops++;
+      } else if (count < FL_MIN_COMPONENTS_TO_FLAG) {
+        var missing = [];
+        if (!decision) { missing.push('Decision'); }
+        if (!action) { missing.push('Action'); }
+        if (!verification) { missing.push('Verification'); }
+        incompleteLoops.push({
+          hookId: hook.id, hookLabel: hook.label,
+          hasDetection: true, hasDecision: decision,
+          hasAction: action, hasVerification: verification, missing: missing,
+        });
+      }
+    }
+    var suggestion;
+    if (incompleteLoops.length > 0) {
+      var counts = { Decision: 0, Action: 0, Verification: 0 };
+      incompleteLoops.forEach(function(loop) {
+        loop.missing.forEach(function(c) { if (counts[c] !== undefined) { counts[c]++; } });
+      });
+      var sorted = Object.keys(counts).filter(function(k) { return counts[k] > 0; })
+        .sort(function(a, b) { return counts[b] - counts[a]; });
+      var mostCommon = sorted.slice(0, 2).join(', ');
+      suggestion = 'Consider completing feedback loops for ' + incompleteLoops.length + ' hook(s) \u2014 most commonly missing: ' + mostCommon + '.';
+    }
+    return { completeLoops: completeLoops, incompleteLoops: incompleteLoops, suggestion: suggestion };
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Health Score Computation
   // ─────────────────────────────────────────────────────────────────────────
@@ -1796,6 +1873,9 @@ var CognitivePanel = (function () {
     // 20. Conflict Resolution Priority (Rule 27)
     var conflictResolution = analyzeConflictResolutionWebview(data.nodes, contradictions.length);
 
+    // 21. Feedback Loop Completeness (Rule 28)
+    var feedbackLoops = analyzeFeedbackLoopsWebview(data.nodes, data.links);
+
     // 11. Cross-Workspace Topology: group external nodes by workspace
     var crossWorkspaceTopology = [];
     var workspaceGroups = {};
@@ -1901,6 +1981,7 @@ var CognitivePanel = (function () {
       contextBudget: contextBudget,
       jailbreakProtection: jailbreakProtection,
       conflictResolution: conflictResolution,
+      feedbackLoops: feedbackLoops,
       healthScore: computeHealthScore({
         steeringsSoltos: steeringsSoltos,
         vinculosFrageis: vinculosFrageis,
@@ -2621,6 +2702,25 @@ var CognitivePanel = (function () {
         }
       } else if (analysis.conflictResolution.suggestion) {
         html += '<div style="padding-left:6px;color:#90A4AE;font-size:8px;margin-top:2px;">\uD83D\uDCA1 ' + escapeHtml(analysis.conflictResolution.suggestion) + '</div>';
+      }
+      html += '</div>';
+    }
+
+    // Feedback Loop Completeness (Rule 28)
+    if (analysis.feedbackLoops && (analysis.feedbackLoops.completeLoops > 0 || analysis.feedbackLoops.incompleteLoops.length > 0)) {
+      html += '<div style="margin-bottom:6px;border-top:1px solid #333;padding-top:6px;">';
+      html += '<span style="color:#90A4AE;font-weight:bold;">\uD83D\uDD04 Feedback Loops</span>';
+      html += '<div style="padding-left:6px;color:#aaa;font-size:9px;margin-top:2px;">' + analysis.feedbackLoops.completeLoops + ' complete loop(s), ' + analysis.feedbackLoops.incompleteLoops.length + ' incomplete loop(s)</div>';
+      if (analysis.feedbackLoops.incompleteLoops.length > 0) {
+        analysis.feedbackLoops.incompleteLoops.slice(0, 5).forEach(function(entry) {
+          html += '<div style="padding-left:6px;color:#78909C;font-size:8px;">\u2022 ' + escapeHtml(entry.hookLabel) + ' — missing: ' + entry.missing.join(', ') + '</div>';
+        });
+        if (analysis.feedbackLoops.incompleteLoops.length > 5) {
+          html += '<div style="padding-left:6px;color:#666;font-size:8px;">...and ' + (analysis.feedbackLoops.incompleteLoops.length - 5) + ' more</div>';
+        }
+      }
+      if (analysis.feedbackLoops.suggestion) {
+        html += '<div style="padding-left:6px;color:#90A4AE;font-size:8px;margin-top:2px;">\uD83D\uDCA1 ' + escapeHtml(analysis.feedbackLoops.suggestion) + '</div>';
       }
       html += '</div>';
     }

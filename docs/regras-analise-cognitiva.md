@@ -752,3 +752,54 @@ Nenhuma linguagem de prioridade encontrada em nenhum steering
 - Defina uma hierarquia clara: segurança > convenções > estilo
 - Use linguagem explícita: "tem prioridade sobre", "prevalece", "sobrepõe"
 
+
+---
+
+### 28. Feedback Loop Completeness (Sugestões de Melhoria)
+
+**O que verifica:** Se os hooks no ecossistema possuem ciclos de feedback completos com todos os 4 componentes: Detection → Decision → Action → Verification. Identifica hooks com ciclos incompletos e sugere melhorias.
+
+**Por que importa:** Um ciclo de feedback completo garante que o agente AI pode detectar um evento, decidir o que fazer com base em critérios, agir com instruções claras e verificar o resultado. Ciclos incompletos significam que o agente opera sem cobertura total — pode detectar mas não verificar, ou agir sem critérios de decisão.
+
+**Componentes:**
+
+| Componente | O que significa | Como é detectado |
+|------------|----------------|------------------|
+| Detection | O hook dispara em um evento | Sempre true (todo hook É um mecanismo de detecção) |
+| Decision | O hook referencia um steering com critérios | Hook tem edge para um nó steering |
+| Action | O hook tem instruções claras | Prompt do hook contém >= 20 palavras |
+| Verification | Outro hook valida o resultado | Um hook postTaskExecution/postToolUse referencia o mesmo steering |
+
+**Classificação:**
+
+| Qtd Componentes | Classificação | Comportamento |
+|----------------|---------------|---------------|
+| 4 (todos) | Loop completo | Contado em `completeLoops` |
+| 3 | Aceitável | Não sinalizado (bom o suficiente) |
+| 1-2 | Incompleto | Sinalizado em `incompleteLoops` com componentes faltantes |
+
+**Exemplo:**
+```
+hook "code-review" (preToolUse)
+  ✅ Detection: dispara em preToolUse
+  ✅ Decision: referencia code-conventions.md
+  ✅ Action: prompt tem 35 palavras com instruções claras
+  ✅ Verification: hook "post-review" (postTaskExecution) referencia code-conventions.md
+  → LOOP COMPLETO (4/4)
+
+hook "auto-format" (fileEdited)
+  ✅ Detection: dispara em fileEdited
+  ❌ Decision: sem referência a steering
+  ❌ Action: prompt tem 5 palavras ("format the file")
+  ❌ Verification: nenhum post-hook referencia o mesmo steering
+  → INCOMPLETO (1/4) — faltando: Decision, Action, Verification
+```
+
+**Importante:** Esta regra produz apenas SUGESTÕES, não erros. Os resultados NÃO afetam o Health Score.
+
+**Impacto:** Ciclos de feedback incompletos significam que o agente opera com lacunas — pode detectar eventos mas agir sem critérios, ou tomar ação sem verificação. Ciclos completos criam um ciclo de automação robusto.
+
+**Como melhorar:**
+1. Para Decision faltante: Adicione uma referência a steering no hook (vincule a um steering com critérios de decisão)
+2. Para Action faltante: Expanda o prompt do hook para >= 20 palavras com instruções imperativas claras
+3. Para Verification faltante: Crie um hook postTaskExecution ou postToolUse que referencie o mesmo steering

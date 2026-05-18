@@ -779,3 +779,92 @@ describe('MarkdownReportGenerator', function () {
       assert.ok(report.includes('This is an improvement suggestion, not a problem. It does not affect the Health Score.'));
     });
   });
+
+  describe('Feedback Loop Completeness section', function () {
+    it('generates section with incomplete loops present', function () {
+      const data = createMinimalResult();
+      data.feedbackLoops = {
+        completeLoops: 2,
+        incompleteLoops: [
+          {
+            hookId: 'hook-a.json',
+            hookLabel: 'hook-a',
+            hasDetection: true,
+            hasDecision: false,
+            hasAction: false,
+            hasVerification: false,
+            missing: ['Decision', 'Action', 'Verification'],
+          },
+        ],
+        suggestion: 'Consider completing feedback loops for 1 hook(s) — most commonly missing: Decision, Action.',
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('## Feedback Loop Completeness'));
+      assert.ok(report.includes('2 complete loop(s), 1 incomplete loop(s)'));
+      assert.ok(report.includes('| hook-a | ✅ | ❌ | ❌ | ❌ | Decision, Action, Verification |'));
+      assert.ok(report.includes('Consider completing feedback loops'));
+    });
+
+    it('omits section when feedbackLoops is undefined', function () {
+      const data = createMinimalResult();
+      const report = generateCognitiveReport(data);
+      assert.ok(!report.includes('## Feedback Loop Completeness'));
+    });
+
+    it('omits section when no hooks (completeLoops=0 and incompleteLoops=[])', function () {
+      const data = createMinimalResult();
+      data.feedbackLoops = {
+        completeLoops: 0,
+        incompleteLoops: [],
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(!report.includes('## Feedback Loop Completeness'));
+    });
+
+    it('informational note is present in header', function () {
+      const data = createMinimalResult();
+      data.feedbackLoops = {
+        completeLoops: 1,
+        incompleteLoops: [
+          {
+            hookId: 'h.json',
+            hookLabel: 'h',
+            hasDetection: true,
+            hasDecision: true,
+            hasAction: false,
+            hasVerification: false,
+            missing: ['Action', 'Verification'],
+          },
+        ],
+        suggestion: 'Consider completing feedback loops for 1 hook(s) — most commonly missing: Action, Verification.',
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('This is an improvement suggestion, not a problem. It does not affect the Health Score.'));
+    });
+
+    it('table uses ✅/❌ for components', function () {
+      const data = createMinimalResult();
+      data.feedbackLoops = {
+        completeLoops: 0,
+        incompleteLoops: [
+          {
+            hookId: 'hook.json',
+            hookLabel: 'hook',
+            hasDetection: true,
+            hasDecision: true,
+            hasAction: false,
+            hasVerification: false,
+            missing: ['Action', 'Verification'],
+          },
+        ],
+        suggestion: 'Consider completing feedback loops for 1 hook(s) — most commonly missing: Action.',
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('✅'));
+      assert.ok(report.includes('❌'));
+    });
+  });

@@ -1953,3 +1953,238 @@ describe('CognitiveValidations — analyzeConflictResolution()', function () {
     assert.strictEqual(result.priorityStatements[0].text, 'In case of conflict, follow security rules');
   });
 });
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Feedback Loop Completeness (Rule 28)
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { analyzeFeedbackLoops } from '../../services/cognitiveValidations';
+
+describe('CognitiveValidations — analyzeFeedbackLoops()', function () {
+  it('Detection is always true for any hook', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook.json', { type: 'hook-auto' }),
+    ];
+    const result = analyzeFeedbackLoops(nodes, []);
+    // Hook with only detection (1 component) → flagged as incomplete
+    assert.strictEqual(result.incompleteLoops.length, 1);
+    assert.strictEqual(result.incompleteLoops[0].hasDetection, true);
+  });
+
+  it('Decision true: hook with edge to steering', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook.json', { type: 'hook-auto' }),
+      makeNode('guide.md', { type: 'steering-flow' }),
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'hook.json', target: 'guide.md', type: 'hook-implicit' },
+    ];
+    const result = analyzeFeedbackLoops(nodes, edges);
+    // 2 components (Detection + Decision) → still < 3, flagged
+    assert.strictEqual(result.incompleteLoops.length, 1);
+    assert.strictEqual(result.incompleteLoops[0].hasDecision, true);
+  });
+
+  it('Decision false: hook with no edges', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook.json', { type: 'hook-manual' }),
+    ];
+    const result = analyzeFeedbackLoops(nodes, []);
+    assert.strictEqual(result.incompleteLoops[0].hasDecision, false);
+  });
+
+  it('Decision false: hook with edge to non-steering node', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook.json', { type: 'hook-auto' }),
+      makeNode('skill.md', { type: 'skill' }),
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'hook.json', target: 'skill.md', type: 'backtick-ref' },
+    ];
+    const result = analyzeFeedbackLoops(nodes, edges);
+    assert.strictEqual(result.incompleteLoops[0].hasDecision, false);
+  });
+
+  it('Action true: hook with prompt >= 20 words', function () {
+    const longPrompt = 'word '.repeat(25).trim();
+    const nodes: GraphNode[] = [
+      makeNode('hook.json', { type: 'hook-auto', metadata: { hookPrompt: longPrompt } }),
+    ];
+    const result = analyzeFeedbackLoops(nodes, []);
+    // Detection + Action = 2 components → flagged
+    assert.strictEqual(result.incompleteLoops[0].hasAction, true);
+  });
+
+  it('Action false: hook with prompt < 20 words', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook.json', { type: 'hook-auto', metadata: { hookPrompt: 'short prompt' } }),
+    ];
+    const result = analyzeFeedbackLoops(nodes, []);
+    assert.strictEqual(result.incompleteLoops[0].hasAction, false);
+  });
+
+  it('Action false: hook without prompt (hookPrompt undefined)', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook.json', { type: 'hook-auto', metadata: {} }),
+    ];
+    const result = analyzeFeedbackLoops(nodes, []);
+    assert.strictEqual(result.incompleteLoops[0].hasAction, false);
+  });
+
+  it('Verification true: another hook postToolUse references same steering', function () {
+    const longPrompt = 'word '.repeat(25).trim();
+    const nodes: GraphNode[] = [
+      makeNode('hook-a.json', { type: 'hook-auto', metadata: { hookPrompt: longPrompt } }),
+      makeNode('hook-b.json', { type: 'hook-auto', metadata: { whenType: 'postToolUse', hookPrompt: longPrompt } }),
+      makeNode('guide.md', { type: 'steering-flow' }),
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'hook-a.json', target: 'guide.md', type: 'hook-implicit' },
+      { source: 'hook-b.json', target: 'guide.md', type: 'hook-implicit' },
+    ];
+    const result = analyzeFeedbackLoops(nodes, edges);
+    // hook-a: Detection + Decision + Action + Verification = 4 → complete
+    // hook-b: Detection + Decision + Action + Verification = 4 → complete (hook-a is also post? No, but hook-a refs same steering)
+    // Actually hook-b verification: needs ANOTHER post-hook referencing same steering. hook-a is not post-event.
+    // hook-b: Detection + Decision + Action = 3 → NOT flagged (>= 3)
+    // hook-a: Detection + Decision + Action + Verification = 4 → complete
+    assert.strictEqual(result.completeLoops, 1); // hook-a is complete
+    assert.strictEqual(result.incompleteLoops.length, 0); // hook-b has 3 components, not flagged
+  });
+
+  it('Verification true: another hook postTaskExecution references same steering', function () {
+    const longPrompt = 'word '.repeat(25).trim();
+    const nodes: GraphNode[] = [
+      makeNode('hook-a.json', { type: 'hook-auto', metadata: { hookPrompt: longPrompt } }),
+      makeNode('hook-b.json', { type: 'hook-manual', metadata: { whenType: 'postTaskExecution', hookPrompt: longPrompt } }),
+      makeNode('rules.md', { type: 'steering-policy' }),
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'hook-a.json', target: 'rules.md', type: 'hook-implicit' },
+      { source: 'hook-b.json', target: 'rules.md', type: 'hook-implicit' },
+    ];
+    const result = analyzeFeedbackLoops(nodes, edges);
+    // hook-a: Detection + Decision + Action + Verification = 4 → complete
+    // hook-b: Detection + Decision + Action = 3 → NOT flagged
+    assert.strictEqual(result.completeLoops, 1);
+    assert.strictEqual(result.incompleteLoops.length, 0);
+  });
+
+  it('Verification false: no post-hook exists', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook.json', { type: 'hook-auto' }),
+      makeNode('guide.md', { type: 'steering-flow' }),
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'hook.json', target: 'guide.md', type: 'hook-implicit' },
+    ];
+    const result = analyzeFeedbackLoops(nodes, edges);
+    assert.strictEqual(result.incompleteLoops[0].hasVerification, false);
+  });
+
+  it('Verification false: post-hook references different steering', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook-a.json', { type: 'hook-auto' }),
+      makeNode('hook-b.json', { type: 'hook-auto', metadata: { whenType: 'postToolUse' } }),
+      makeNode('guide.md', { type: 'steering-flow' }),
+      makeNode('other.md', { type: 'steering-domain' }),
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'hook-a.json', target: 'guide.md', type: 'hook-implicit' },
+      { source: 'hook-b.json', target: 'other.md', type: 'hook-implicit' },
+    ];
+    const result = analyzeFeedbackLoops(nodes, edges);
+    assert.strictEqual(result.incompleteLoops[0].hasVerification, false);
+  });
+
+  it('complete loop: all 4 components → counted in completeLoops', function () {
+    const longPrompt = 'word '.repeat(25).trim();
+    const nodes: GraphNode[] = [
+      makeNode('hook-a.json', { type: 'hook-auto', metadata: { hookPrompt: longPrompt } }),
+      makeNode('hook-b.json', { type: 'hook-auto', metadata: { whenType: 'postToolUse' } }),
+      makeNode('guide.md', { type: 'steering-flow' }),
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'hook-a.json', target: 'guide.md', type: 'hook-implicit' },
+      { source: 'hook-b.json', target: 'guide.md', type: 'hook-implicit' },
+    ];
+    const result = analyzeFeedbackLoops(nodes, edges);
+    assert.strictEqual(result.completeLoops, 1);
+  });
+
+  it('incomplete loop: only Detection (1 component) → flagged', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook.json', { type: 'hook-auto', metadata: { hookPrompt: 'short' } }),
+    ];
+    const result = analyzeFeedbackLoops(nodes, []);
+    assert.strictEqual(result.incompleteLoops.length, 1);
+    assert.deepStrictEqual(result.incompleteLoops[0].missing, ['Decision', 'Action', 'Verification']);
+  });
+
+  it('incomplete loop: Detection + Decision (2 components) → flagged', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook.json', { type: 'hook-auto' }),
+      makeNode('guide.md', { type: 'steering-flow' }),
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'hook.json', target: 'guide.md', type: 'hook-implicit' },
+    ];
+    const result = analyzeFeedbackLoops(nodes, edges);
+    assert.strictEqual(result.incompleteLoops.length, 1);
+    assert.ok(result.incompleteLoops[0].missing.includes('Action'));
+    assert.ok(result.incompleteLoops[0].missing.includes('Verification'));
+  });
+
+  it('not flagged: Detection + Decision + Action (3 components) → not in incompleteLoops', function () {
+    const longPrompt = 'word '.repeat(25).trim();
+    const nodes: GraphNode[] = [
+      makeNode('hook.json', { type: 'hook-auto', metadata: { hookPrompt: longPrompt } }),
+      makeNode('guide.md', { type: 'steering-flow' }),
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'hook.json', target: 'guide.md', type: 'hook-implicit' },
+    ];
+    const result = analyzeFeedbackLoops(nodes, edges);
+    assert.strictEqual(result.incompleteLoops.length, 0);
+  });
+
+  it('empty graph: completeLoops=0, incompleteLoops=[], no suggestion', function () {
+    const result = analyzeFeedbackLoops([], []);
+    assert.strictEqual(result.completeLoops, 0);
+    assert.strictEqual(result.incompleteLoops.length, 0);
+    assert.strictEqual(result.suggestion, undefined);
+  });
+
+  it('suggestion generated when incompleteLoops > 0', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook.json', { type: 'hook-auto' }),
+    ];
+    const result = analyzeFeedbackLoops(nodes, []);
+    assert.ok(result.suggestion);
+    assert.ok(result.suggestion!.includes('Consider completing'));
+  });
+
+  it('suggestion not generated when all hooks have >= 3 components', function () {
+    const longPrompt = 'word '.repeat(25).trim();
+    const nodes: GraphNode[] = [
+      makeNode('hook.json', { type: 'hook-auto', metadata: { hookPrompt: longPrompt } }),
+      makeNode('guide.md', { type: 'steering-flow' }),
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'hook.json', target: 'guide.md', type: 'hook-implicit' },
+    ];
+    const result = analyzeFeedbackLoops(nodes, edges);
+    assert.strictEqual(result.suggestion, undefined);
+  });
+
+  it('missing never contains "Detection"', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook.json', { type: 'hook-auto' }),
+    ];
+    const result = analyzeFeedbackLoops(nodes, []);
+    for (const entry of result.incompleteLoops) {
+      assert.ok(!entry.missing.includes('Detection'));
+    }
+  });
+});

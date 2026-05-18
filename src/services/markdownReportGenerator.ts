@@ -49,6 +49,7 @@ export function generateCognitiveReport(
   appendContextBudget(lines, data);
   appendJailbreakProtection(lines, data);
   appendConflictResolution(lines, data);
+  appendFeedbackLoops(lines, data);
   appendRecommendations(lines, data);
   appendInstructionsForAI(lines, data);
 
@@ -607,6 +608,34 @@ function appendConflictResolution(lines: string[], data: CognitiveAnalysisResult
   }
 }
 
+function appendFeedbackLoops(lines: string[], data: CognitiveAnalysisResult): void {
+  if (!data.feedbackLoops) { return; }
+  const fl = data.feedbackLoops;
+  if (fl.completeLoops === 0 && fl.incompleteLoops.length === 0) { return; }
+  if (fl.incompleteLoops.length === 0) { return; }
+
+  lines.push('## Feedback Loop Completeness');
+  lines.push('');
+  lines.push('> This is an improvement suggestion, not a problem. It does not affect the Health Score.');
+  lines.push('');
+  lines.push(`${fl.completeLoops} complete loop(s), ${fl.incompleteLoops.length} incomplete loop(s).`);
+  lines.push('');
+  lines.push('| Hook | Detection | Decision | Action | Verification | Missing |');
+  lines.push('|------|-----------|----------|--------|--------------|---------|');
+  for (const entry of fl.incompleteLoops) {
+    const det = entry.hasDetection ? '✅' : '❌';
+    const dec = entry.hasDecision ? '✅' : '❌';
+    const act = entry.hasAction ? '✅' : '❌';
+    const ver = entry.hasVerification ? '✅' : '❌';
+    lines.push(`| ${entry.hookLabel} | ${det} | ${dec} | ${act} | ${ver} | ${entry.missing.join(', ')} |`);
+  }
+  lines.push('');
+  if (fl.suggestion) {
+    lines.push(`> ${fl.suggestion}`);
+    lines.push('');
+  }
+}
+
 function appendRecommendations(lines: string[], data: CognitiveAnalysisResult): void {
   if (data.sugestoes.length === 0) { return; }
   lines.push('## Recommendations');
@@ -704,6 +733,9 @@ function appendInstructionsForAI(lines: string[], data: CognitiveAnalysisResult)
   }
   if (data.conflictResolution && data.conflictResolution.suggestion) {
     lines.push(`${step++}. Consider defining a priority hierarchy between steerings to resolve potential contradictions (Conflict Resolution suggestion).`);
+  }
+  if (data.feedbackLoops && data.feedbackLoops.incompleteLoops.length > 0) {
+    lines.push(`${step++}. Consider completing feedback loops for hooks with incomplete Detection\u2192Decision\u2192Action\u2192Verification cycles.`);
   }
 
   lines.push('');

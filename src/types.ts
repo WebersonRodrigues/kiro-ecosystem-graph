@@ -425,6 +425,9 @@ export interface CognitiveAnalysisResult {
 
   /** Conflict resolution priority analysis — improvement suggestions (Rule 27) */
   conflictResolution?: ConflictResolutionResult;
+
+  /** Feedback loop completeness analysis — improvement suggestions (Rule 28) */
+  feedbackLoops?: FeedbackLoopResult;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -962,5 +965,37 @@ export interface ContextBudgetResult {
   /** Per-steering breakdown */
   perSteering: ContextBudgetSteeringEntry[];
   /** Suggestion text when consumption > 15% threshold */
+  suggestion?: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Feedback Loop Completeness Types (Rule 28)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Per-hook feedback loop analysis entry */
+export interface IncompleteLoopEntry {
+  /** Hook node id */
+  hookId: string;
+  /** Hook label */
+  hookLabel: string;
+  /** Detection component (always true — the hook IS the detection) */
+  hasDetection: boolean;
+  /** Decision component (hook has edge to a steering with criteria) */
+  hasDecision: boolean;
+  /** Action component (hook prompt has >= 20 words) */
+  hasAction: boolean;
+  /** Verification component (another post-hook references the same steering) */
+  hasVerification: boolean;
+  /** List of missing component names */
+  missing: string[];
+}
+
+/** Complete feedback loop analysis result */
+export interface FeedbackLoopResult {
+  /** Count of hooks with all 4 components present */
+  completeLoops: number;
+  /** Hooks with < 3 components (too incomplete) */
+  incompleteLoops: IncompleteLoopEntry[];
+  /** Summary suggestion (only when incompleteLoops.length > 0) */
   suggestion?: string;
 }

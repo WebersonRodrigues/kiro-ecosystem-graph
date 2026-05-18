@@ -32,6 +32,8 @@ import type {
   JailbreakProtectionResult,
   PriorityStatement,
   ConflictResolutionResult,
+  IncompleteLoopEntry,
+  FeedbackLoopResult,
 } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2181,4 +2183,156 @@ export function analyzeConflictResolution(
     : undefined;
 
   return { hasPriorityDefined, priorityStatements, suggestion };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Feedback Loop Completeness (Rule 28)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Minimum word count for a hook prompt to qualify as an Action */
+const MIN_ACTION_WORD_COUNT = 20;
+
+/** Minimum components to NOT be flagged (hooks with >= 3 are acceptable) */
+const MIN_COMPONENTS_TO_FLAG = 3;
+
+/** Event types that qualify as verification hooks */
+const POST_EVENT_TYPES = ['postTaskExecution', 'postToolUse'];
+
+/**
+ * Returns ids of steering nodes connected to the given node via edges.
+ */
+function getConnectedSteeringIds(
+  nodeId: string,
+  edges: GraphEdge[],
+  nodes: GraphNode[],
+): string[] {
+  const steeringIds: string[] = [];
+  for (const edge of edges) {
+    const otherId = edge.source === nodeId ? edge.target : edge.source;
+    if (otherId === nodeId) { continue; }
+    const otherNode = nodes.find((n) => n.id === otherId);
+    if (otherNode && otherNode.type && otherNode.type.startsWith('steering-')) {
+      steeringIds.push(otherId);
+    }
+  }
+  return steeringIds;
+}
+
+/**
+ * Checks if a hook has a Decision component (edge to a steering node).
+ */
+function hasHookDecision(
+  hookId: string,
+  edges: GraphEdge[],
+  nodes: GraphNode[],
+): boolean {
+  return getConnectedSteeringIds(hookId, edges, nodes).length > 0;
+}
+
+/**
+ * Checks if a hook has an Action component (prompt >= 20 words).
+ */
+function hasHookAction(hookNode: GraphNode): boolean {
+  const prompt = hookNode.metadata?.hookPrompt
+    || hookNode.metadata?.description
+    || '';
+  const words = prompt.split(/\s+/).filter((w) => w.length > 0);
+  return words.length >= MIN_ACTION_WORD_COUNT;
+}
+
+/**
+ * Checks if a hook has a Verification component.
+ * True when another hook with a post-event type references the same steering.
+ */
+function hasHookVerification(
+  hookId: string,
+  edges: GraphEdge[],
+  nodes: GraphNode[],
+): boolean {
+  const connectedSteerings = getConnectedSteeringIds(hookId, edges, nodes);
+  if (connectedSteerings.length === 0) { return false; }
+
+  const postHooks = nodes.filter((n) =>
+    (n.type === 'hook-auto' || n.type === 'hook-manual') &&
+    n.id !== hookId &&
+    POST_EVENT_TYPES.includes(n.metadata?.whenType || ''),
+  );
+
+  for (const postHook of postHooks) {
+    const postSteerings = getConnectedSteeringIds(postHook.id, edges, nodes);
+    const hasShared = connectedSteerings.some((s) => postSteerings.includes(s));
+    if (hasShared) { return true; }
+  }
+  return false;
+}
+
+/**
+ * Generates a suggestion string for incomplete loops.
+ */
+function generateLoopSuggestion(incompleteLoops: IncompleteLoopEntry[]): string {
+  const counts: Record<string, number> = {
+    Decision: 0, Action: 0, Verification: 0,
+  };
+  for (const loop of incompleteLoops) {
+    for (const component of loop.missing) {
+      if (counts[component] !== undefined) { counts[component]++; }
+    }
+  }
+  const sorted = Object.entries(counts)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name]) => name);
+
+  const mostCommon = sorted.slice(0, 2).join(', ');
+  return `Consider completing feedback loops for ${incompleteLoops.length} hook(s) — most commonly missing: ${mostCommon}.`;
+}
+
+/**
+ * Analyzes feedback loop completeness for all hooks in the ecosystem.
+ * Returns complete/incomplete loop counts and improvement suggestions.
+ */
+export function analyzeFeedbackLoops(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+): FeedbackLoopResult {
+  const hooks = nodes.filter(
+    (n) => n.type === 'hook-auto' || n.type === 'hook-manual',
+  );
+
+  let completeLoops = 0;
+  const incompleteLoops: IncompleteLoopEntry[] = [];
+
+  for (const hook of hooks) {
+    const detection = true;
+    const decision = hasHookDecision(hook.id, edges, nodes);
+    const action = hasHookAction(hook);
+    const verification = hasHookVerification(hook.id, edges, nodes);
+
+    const componentCount = [detection, decision, action, verification]
+      .filter(Boolean).length;
+
+    if (componentCount === 4) {
+      completeLoops++;
+    } else if (componentCount < MIN_COMPONENTS_TO_FLAG) {
+      const missing: string[] = [];
+      if (!decision) { missing.push('Decision'); }
+      if (!action) { missing.push('Action'); }
+      if (!verification) { missing.push('Verification'); }
+      incompleteLoops.push({
+        hookId: hook.id,
+        hookLabel: hook.label,
+        hasDetection: detection,
+        hasDecision: decision,
+        hasAction: action,
+        hasVerification: verification,
+        missing,
+      });
+    }
+  }
+
+  const suggestion = incompleteLoops.length > 0
+    ? generateLoopSuggestion(incompleteLoops)
+    : undefined;
+
+  return { completeLoops, incompleteLoops, suggestion };
 }
