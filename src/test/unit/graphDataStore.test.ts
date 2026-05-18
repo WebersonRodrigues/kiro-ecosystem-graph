@@ -13,6 +13,7 @@ function createParseResult(
     workspaceFolder: 'Workspace',
     filePath: nodeId,
     resolved: true,
+    source: 'local',
   };
 
   const refs: Reference[] = references.map((r) => ({
@@ -69,6 +70,7 @@ describe('GraphDataStore', function () {
           workspaceFolder: 'Workspace',
           filePath: '.kiro/steering/test.md',
           resolved: true,
+          source: 'local',
         },
         references: [
           {

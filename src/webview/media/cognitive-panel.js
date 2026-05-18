@@ -850,9 +850,12 @@ var CognitivePanel = (function () {
     });
 
     // 1. Steerings Soltos: steering nodes with 0 incoming + 0 outgoing
+    // Exclude external/global nodes with resolved: true
     var steeringsSoltos = [];
     data.nodes.forEach(function(n) {
       if (n.type && n.type.indexOf('steering-') === 0) {
+        // Skip external/global resolved nodes
+        if (n.source && n.source !== 'local' && n.resolved !== false) { return; }
         if ((incomingMap[n.id] || 0) === 0 && (outgoingMap[n.id] || 0) === 0) {
           steeringsSoltos.push({ id: n.id, label: n.label });
         }
@@ -878,8 +881,11 @@ var CognitivePanel = (function () {
     });
 
     // 3. Arquivos sem Contexto: nodes with 0 total edges
+    // Exclude external/global nodes with resolved: true
     var arquivosSemContexto = [];
     data.nodes.forEach(function(n) {
+      // Skip external/global resolved nodes
+      if (n.source && n.source !== 'local' && n.resolved !== false) { return; }
       var totalEdges = (incomingMap[n.id] || 0) + (outgoingMap[n.id] || 0);
       if (totalEdges === 0) {
         arquivosSemContexto.push({ id: n.id, label: n.label, type: n.type });
@@ -1016,6 +1022,42 @@ var CognitivePanel = (function () {
     var qualityGate = checkQualityGate(data.nodes, data.links);
     var dmlProtection = checkDmlProtection(data.nodes, data.links);
 
+    // 10. Broken External Links: external nodes with resolved: false
+    var brokenExternalLinks = [];
+    data.nodes.forEach(function(n) {
+      if (n.source && n.source !== 'local' && n.resolved === false) {
+        brokenExternalLinks.push({ id: n.id, label: n.label, targetPath: n.filePath || n.id });
+      }
+    });
+
+    // 11. Cross-Workspace Topology: group external nodes by workspace
+    var crossWorkspaceTopology = [];
+    var workspaceGroups = {};
+    data.nodes.forEach(function(n) {
+      if (n.source && n.source !== 'local' && n.workspaceFolder) {
+        if (!workspaceGroups[n.workspaceFolder]) {
+          workspaceGroups[n.workspaceFolder] = { resolved: 0, unresolved: 0, source: n.source };
+        }
+        if (n.resolved === false) {
+          workspaceGroups[n.workspaceFolder].unresolved++;
+        } else {
+          workspaceGroups[n.workspaceFolder].resolved++;
+        }
+      }
+    });
+    Object.keys(workspaceGroups).forEach(function(ws) {
+      var group = workspaceGroups[ws];
+      var total = group.resolved + group.unresolved;
+      crossWorkspaceTopology.push({
+        workspace: ws,
+        source: group.source,
+        totalNodes: total,
+        resolvedNodes: group.resolved,
+        unresolvedNodes: group.unresolved,
+        status: group.unresolved > 0 ? 'partially-connected' : 'connected',
+      });
+    });
+
     // 10. Suggestions for new validations
     if (deadLoops.length > 0) {
       sugestoes.push(deadLoops.length + ' dead loop(s) detected — isolated cycles with no external entry. Add an entry point that references at least one node in each cycle.');
@@ -1078,6 +1120,8 @@ var CognitivePanel = (function () {
       decisionPathCompleteness: decisionPathCompleteness,
       qualityGate: qualityGate,
       dmlProtection: dmlProtection,
+      brokenExternalLinks: brokenExternalLinks,
+      crossWorkspaceTopology: crossWorkspaceTopology,
     };
   }
 

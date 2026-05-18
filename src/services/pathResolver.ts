@@ -1,4 +1,22 @@
 import * as path from 'path';
+import * as fs from 'fs';
+import type { ExternalResolutionResult, NodeSource } from '../types';
+
+/**
+ * Derives a workspace name from an external path.
+ * Uses the last segment before `.kiro/` if present, otherwise the last directory segment.
+ */
+export function deriveWorkspaceFromPath(dirPath: string): string {
+  const normalized = dirPath.replace(/\\/g, '/').replace(/\/$/, '');
+  const kiroIdx = normalized.indexOf('/.kiro');
+  if (kiroIdx !== -1) {
+    const beforeKiro = normalized.slice(0, kiroIdx);
+    const segments = beforeKiro.split('/');
+    return segments[segments.length - 1] || normalized;
+  }
+  const segments = normalized.split('/');
+  return segments[segments.length - 1] || normalized;
+}
 
 /**
  * Service responsible for resolving relative paths across workspace folders.
@@ -29,4 +47,74 @@ export class PathResolver {
     const sourceDir = path.posix.dirname(sourceRelativePath);
     return path.posix.join(sourceDir, normalized);
   }
+
+  /**
+   * Resolves an external path reference (containing ../ that escapes the workspace).
+   * Resolves to an absolute path, checks existence, and derives workspace name.
+   *
+   * @param targetPath - The raw relative path containing ../
+   * @param sourceAbsoluteDir - The absolute directory of the source file
+   * @returns ExternalResolutionResult with resolution details
+   */
+  resolveExternal(targetPath: string, sourceAbsoluteDir: string): ExternalResolutionResult {
+    const normalized = targetPath.replace(/\\/g, '/');
+
+    // Resolve to absolute path
+    const absolutePath = path.resolve(sourceAbsoluteDir, normalized);
+
+    // Normalize to POSIX
+    const posixPath = normalizeToPosix(absolutePath);
+
+    // Check existence
+    const exists = fs.existsSync(absolutePath);
+
+    // Derive workspace name
+    const derivedWorkspace = deriveWorkspaceFromPath(posixPath);
+
+    const source: NodeSource = 'external-resolved';
+
+    return {
+      absolutePath: posixPath,
+      exists,
+      derivedWorkspace,
+      source,
+    };
+  }
+
+  /**
+   * Checks if a target path escapes the workspace folder (contains ../ going above root).
+   *
+   * @param targetPath - The raw relative path to check
+   * @param sourceRelativePath - The relative path of the source file
+   * @returns true if the path escapes the workspace
+   */
+  escapesWorkspace(targetPath: string, sourceRelativePath: string): boolean {
+    const normalized = targetPath.replace(/\\/g, '/');
+    if (!normalized.includes('../')) { return false; }
+
+    // Resolve relative to source directory
+    const sourceDir = path.posix.dirname(sourceRelativePath);
+    const resolved = path.posix.normalize(path.posix.join(sourceDir, normalized));
+
+    // If the resolved path starts with .. it escapes the workspace
+    return resolved.startsWith('..');
+  }
+}
+
+/**
+ * Normalizes a path to POSIX format (forward slashes, no redundant ./ segments).
+ */
+export function normalizeToPosix(inputPath: string): string {
+  let result = inputPath.replace(/\\/g, '/');
+  // Remove redundant ./ segments
+  result = result.replace(/\/\.\//g, '/');
+  // Remove trailing ./
+  if (result.endsWith('/.')) {
+    result = result.slice(0, -2);
+  }
+  // Remove leading ./
+  if (result.startsWith('./')) {
+    result = result.slice(2);
+  }
+  return result;
 }

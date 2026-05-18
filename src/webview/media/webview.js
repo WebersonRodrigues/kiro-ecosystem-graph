@@ -423,6 +423,12 @@ function showTooltip(node, event) {
     }
   }
 
+  // Source badge for external/global nodes
+  if (node.source && node.source !== 'local') {
+    var sourceBadge = node.source === 'global' ? '\uD83C\uDF10 global' : '\uD83D\uDD17 ' + escapeHtml(node.workspaceFolder || 'external');
+    html += '<br><span style="color:#FF9800;font-size:9px;background:#333;padding:1px 4px;border-radius:2px">' + sourceBadge + '</span>';
+  }
+
   tooltip.innerHTML = html;
   tooltip.style.display = 'block';
   positionTooltip(event);
@@ -785,6 +791,31 @@ const graph = ForceGraph()(graphContainer)
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.arc(node.x, node.y, size + 3, 0, 2 * Math.PI);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // External/Global node border differentiation
+    if (node.source === 'external-configured' || node.source === 'external-resolved') {
+      // Dashed border for external nodes
+      ctx.save();
+      ctx.globalAlpha = 0.7;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, size + 2, 0, 2 * Math.PI);
+      ctx.stroke();
+      ctx.restore();
+    } else if (node.source === 'global') {
+      // Dotted border for global nodes
+      ctx.save();
+      ctx.globalAlpha = 0.7;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([1, 3]);
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, size + 2, 0, 2 * Math.PI);
       ctx.stroke();
       ctx.restore();
     }
@@ -1262,6 +1293,10 @@ var visibleTypes = new Set(Object.keys(COLOR_MAP));
 // eslint-disable-next-line no-unused-vars
 var visibleFolders = new Set();
 
+/** @type {Set<string>} Set of visible source types (all active by default) */
+// eslint-disable-next-line no-unused-vars
+var visibleSources = new Set(['local', 'external-configured', 'external-resolved', 'global']);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Filters
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1300,6 +1335,14 @@ function applyFilters(data) {
   // Filter: by workspace folder (only apply if visibleFolders is populated)
   if (visibleFolders.size > 0) {
     nodes = nodes.filter(function (n) { return visibleFolders.has(n.workspaceFolder); });
+  }
+
+  // Filter: by source (only apply if not all sources are visible)
+  if (visibleSources.size < 4) {
+    nodes = nodes.filter(function (n) {
+      var source = n.source || 'local';
+      return visibleSources.has(source);
+    });
   }
 
   // Filter: by search text (case-insensitive contains on label)

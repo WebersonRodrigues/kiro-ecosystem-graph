@@ -46,6 +46,24 @@
         "icon": "$(graph)"
       }
     ],
+    "configuration": {
+      "title": "Ecosystem Graph",
+      "properties": {
+        "ecosystemGraph.externalPaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional filesystem paths to scan for ecosystem files (steerings, skills, hooks). Supports ~ and environment variables."
+        },
+        "ecosystemGraph.includeGlobalSteerings": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include global steerings from ~/.kiro/ in the graph."
+        }
+      }
+    },
     "viewsContainers": {
       "activitybar": [
         {

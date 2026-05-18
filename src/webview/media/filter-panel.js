@@ -116,6 +116,28 @@ var rebuildFilterToggles;
         filterTogglesContainer.appendChild(btn);
       });
     }
+
+    // Section: Source (local, external, global)
+    var allSources = getAllSources();
+    if (allSources.length > 1) {
+      var sourceLabel = document.createElement('div');
+      sourceLabel.className = 'filter-section-label';
+      sourceLabel.textContent = 'Source';
+      filterTogglesContainer.appendChild(sourceLabel);
+
+      var sourceColors = {
+        'local': '#4CAF50',
+        'external': '#FF9800',
+        'global': '#9C27B0',
+      };
+
+      allSources.forEach(function (source) {
+        var btn = createToggleButton(source, sourceColors[source] || '#607D8B', 'source');
+        var isActive = isSourceActive(source);
+        btn.classList.add(isActive ? 'active' : 'inactive');
+        filterTogglesContainer.appendChild(btn);
+      });
+    }
   };
 
   /**
@@ -151,23 +173,66 @@ var rebuildFilterToggles;
   /**
    * Handle toggle button click — add/remove from visibleTypes or visibleFolders.
    * @param {HTMLElement} btn
-   * @param {string} category - 'type' or 'folder'
-   * @param {string} value - The type name or folder name
+   * @param {string} category - 'type', 'folder', or 'source'
+   * @param {string} value - The type name, folder name, or source name
    */
   function handleToggleClick(btn, category, value) {
-    var targetSet = category === 'type' ? visibleTypes : visibleFolders;
-
-    if (targetSet.has(value)) {
-      targetSet.delete(value);
-      btn.classList.remove('active');
-      btn.classList.add('inactive');
+    if (category === 'source') {
+      handleSourceToggle(btn, value);
     } else {
-      targetSet.add(value);
-      btn.classList.remove('inactive');
-      btn.classList.add('active');
+      var targetSet = category === 'type' ? visibleTypes : visibleFolders;
+
+      if (targetSet.has(value)) {
+        targetSet.delete(value);
+        btn.classList.remove('active');
+        btn.classList.add('inactive');
+      } else {
+        targetSet.add(value);
+        btn.classList.remove('inactive');
+        btn.classList.add('active');
+      }
     }
 
     reapplyFilters();
+  }
+
+  /**
+   * Handle source filter toggle. Maps display names to actual source values.
+   * 'local' → visibleSources: 'local'
+   * 'external' → visibleSources: 'external-configured', 'external-resolved'
+   * 'global' → visibleSources: 'global'
+   */
+  function handleSourceToggle(btn, value) {
+    var sourceValues = getSourceValues(value);
+    var isActive = sourceValues.every(function (s) { return visibleSources.has(s); });
+
+    if (isActive) {
+      sourceValues.forEach(function (s) { visibleSources.delete(s); });
+      btn.classList.remove('active');
+      btn.classList.add('inactive');
+    } else {
+      sourceValues.forEach(function (s) { visibleSources.add(s); });
+      btn.classList.remove('inactive');
+      btn.classList.add('active');
+    }
+  }
+
+  /**
+   * Maps a display source name to actual source values.
+   */
+  function getSourceValues(displayName) {
+    if (displayName === 'external') {
+      return ['external-configured', 'external-resolved'];
+    }
+    return [displayName];
+  }
+
+  /**
+   * Checks if a display source name is currently active.
+   */
+  function isSourceActive(displayName) {
+    var values = getSourceValues(displayName);
+    return values.every(function (s) { return visibleSources.has(s); });
   }
 
   /**
@@ -197,6 +262,25 @@ var rebuildFilterToggles;
       if (n.workspaceFolder) { folders.add(n.workspaceFolder); }
     });
     return Array.from(folders).sort();
+  }
+
+  /**
+   * Get all unique source display names from the current graph data.
+   * Groups external-configured and external-resolved into 'external'.
+   * @returns {string[]}
+   */
+  function getAllSources() {
+    if (typeof graphData === 'undefined' || !graphData.nodes) { return []; }
+    var sources = new Set();
+    graphData.nodes.forEach(function (n) {
+      var source = n.source || 'local';
+      if (source === 'external-configured' || source === 'external-resolved') {
+        sources.add('external');
+      } else {
+        sources.add(source);
+      }
+    });
+    return Array.from(sources).sort();
   }
 
   // ─────────────────────────────────────────────────────────────────────────

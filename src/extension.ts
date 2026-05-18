@@ -7,7 +7,7 @@ import { PathResolver } from './services/pathResolver';
 import { AnnotationService } from './services/annotationService';
 import { SnapshotService } from './services/snapshotService';
 import { EcosystemGraphProvider } from './webview/webviewProvider';
-import { FileChangeEvent } from './types';
+import { FileChangeEvent, EcosystemFile, ParseResult } from './types';
 
 export function activate(context: vscode.ExtensionContext): void {
   const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -48,7 +48,12 @@ export function activate(context: vscode.ExtensionContext): void {
     handleFileChange(event, fileDiscoveryService, parserService, graphDataStore, webviewProvider, annotationService, snapshotService);
   });
 
-  context.subscriptions.push(viewRegistration, showCommand, fileWatcher);
+  // Configuration change listener for external paths
+  const configWatcher = fileDiscoveryService.onConfigurationChanged(() => {
+    loadExternalAndGlobal(fileDiscoveryService, parserService, graphDataStore, webviewProvider, annotationService, snapshotService);
+  });
+
+  context.subscriptions.push(viewRegistration, showCommand, fileWatcher, configWatcher);
 }
 
 export function deactivate(): void {
@@ -167,8 +172,113 @@ async function initializeGraph(
     const snapshotList = await snapshotService.list();
 
     webviewProvider.updateGraph(graphDataStore.getSerializableGraph(), undefined, annotations, snapshotList);
+
+    // Lazy load external and global files after local graph is rendered
+    loadExternalAndGlobal(discoveryService, parserService, graphDataStore, webviewProvider, annotationService, snapshotService);
   } catch {
     // Discovery failure — graph starts empty
+  }
+}
+
+/**
+ * Loads external and global ecosystem files lazily (after local graph is rendered).
+ * Does not block the initial rendering.
+ */
+async function loadExternalAndGlobal(
+  discoveryService: FileDiscoveryService,
+  parserService: ParserService,
+  graphDataStore: GraphDataStore,
+  webviewProvider: EcosystemGraphProvider,
+  annotationService: AnnotationService,
+  snapshotService: SnapshotService
+): Promise<void> {
+  try {
+    // Build knownSteeringFiles from current graph for reference resolution
+    const knownSteeringFiles = new Map<string, string>();
+    for (const node of graphDataStore.getNodes()) {
+      if (node.type.startsWith('steering-')) {
+        const basename = node.filePath.split('/').pop() || '';
+        knownSteeringFiles.set(basename, node.filePath);
+      }
+    }
+
+    // Discover external files
+    const externalResult = await discoveryService.discoverExternal();
+    let hasChanges = false;
+
+    for (const file of externalResult.files) {
+      try {
+        const content = await readFileContent(file.uri);
+        const result = parseExternalFile(file, content, parserService, knownSteeringFiles);
+        if (!result) { continue; }
+
+        const lineCount = content.split('\n').length;
+        result.node.metadata = { ...result.node.metadata, lineCount };
+
+        graphDataStore.upsertFile(result);
+        hasChanges = true;
+      } catch {
+        // Skip files that fail to parse
+      }
+    }
+
+    // Discover global files
+    const globalFiles = await discoveryService.discoverGlobal();
+
+    for (const file of globalFiles) {
+      try {
+        const content = await readFileContent(file.uri);
+        const result = parseExternalFile(file, content, parserService, knownSteeringFiles);
+        if (!result) { continue; }
+
+        const lineCount = content.split('\n').length;
+        result.node.metadata = { ...result.node.metadata, lineCount };
+
+        graphDataStore.upsertFile(result);
+        hasChanges = true;
+      } catch {
+        // Skip files that fail to parse
+      }
+    }
+
+    if (hasChanges) {
+      computeEccentricities(graphDataStore);
+      await annotationService.load();
+      const annotations = annotationService.getAll();
+      const snapshotList = await snapshotService.list();
+      webviewProvider.updateGraph(graphDataStore.getSerializableGraph(), undefined, annotations, snapshotList);
+    }
+  } catch (err) {
+    console.warn(`[EcosystemGraph] Failed to load external/global files: ${err}`);
+  }
+}
+
+/**
+ * Reads file content from a URI (works for both local and external files).
+ */
+async function readFileContent(uri: vscode.Uri): Promise<string> {
+  const document = await vscode.workspace.openTextDocument(uri);
+  return document.getText();
+}
+
+/**
+ * Parses an external/global file using the appropriate parser method.
+ */
+function parseExternalFile(
+  file: EcosystemFile,
+  content: string,
+  parserService: ParserService,
+  knownSteeringFiles: Map<string, string>,
+): ParseResult | null {
+  switch (file.category) {
+    case 'steering':
+      return parserService.parse(file, content, knownSteeringFiles);
+    case 'skill':
+      return parserService.parseSkill(file, content, knownSteeringFiles);
+    case 'hook':
+      return parserService.parseHook(file, content, knownSteeringFiles);
+    default:
+      return null;
   }
 }
 

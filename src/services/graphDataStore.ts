@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { GraphNode, GraphEdge, ParseResult, SerializedGraph } from '../types';
+import { GraphNode, GraphEdge, ParseResult, SerializedGraph, NodeSource } from '../types';
 import { NodeClassifier } from './nodeClassifier';
 import { isEcosystemRelevantPath } from './parserService';
 
@@ -42,7 +42,7 @@ export class GraphDataStore {
    *
    * Steps:
    * 1. Remove existing edges where source matches the file's node id
-   * 2. Add/update the file's node
+   * 2. Add/update the file's node (preserving source)
    * 3. For each reference, ensure target node exists (create as unresolved if not)
    * 4. Add new edges from the references
    *
@@ -50,6 +50,11 @@ export class GraphDataStore {
    */
   upsertFile(result: ParseResult): void {
     const { node, references } = result;
+
+    // Ensure node has a source (default to 'local' if not set)
+    if (!node.source) {
+      node.source = 'local';
+    }
 
     // 1. Remove existing edges where source matches this file's node id
     this.edges = this.edges.filter(edge => edge.source !== node.id);
@@ -68,6 +73,7 @@ export class GraphDataStore {
         const label = this.deriveLabelFromPath(ref.target);
         const fileName = path.basename(ref.target);
         const nodeType = this.nodeClassifier.classify(fileName, '', true);
+        const source: NodeSource = 'local';
         const unresolvedNode: GraphNode = {
           id: ref.target,
           label,
@@ -75,6 +81,7 @@ export class GraphDataStore {
           workspaceFolder: '',
           filePath: ref.target,
           resolved: false,
+          source,
         };
         this.nodes.set(ref.target, unresolvedNode);
       }

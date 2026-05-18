@@ -91,6 +91,7 @@ export class ParserService {
       workspaceFolder: file.workspaceFolder,
       filePath: file.relativePath,
       resolved: true,
+      source: (file as EcosystemFile).source || 'local',
       metadata: metadata.inclusion ? { inclusion: metadata.inclusion } : undefined,
     };
 
@@ -145,6 +146,7 @@ export class ParserService {
       workspaceFolder: file.workspaceFolder,
       filePath: file.relativePath,
       resolved: true,
+      source: file.source || 'local',
     };
 
     const references: Reference[] = [];
@@ -197,6 +199,7 @@ export class ParserService {
       workspaceFolder: file.workspaceFolder,
       filePath: file.relativePath,
       resolved: true,
+      source: file.source || 'local',
     };
 
     // Extract references from then.prompt (with shared dedup set)

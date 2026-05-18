@@ -1,6 +1,73 @@
 import type * as vscode from 'vscode';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Node Source (Multi-Workspace Orchestration)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Provenance of a graph node — indicates where the file was discovered.
+ * - 'local': discovered within the open workspace folders
+ * - 'external-configured': discovered via ecosystemGraph.externalPaths setting
+ * - 'external-resolved': created by resolving a ../ reference to an external file
+ * - 'global': discovered in ~/.kiro/steering/ (global steerings)
+ */
+export type NodeSource = 'local' | 'external-configured' | 'external-resolved' | 'global';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// External Discovery
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Options for external filesystem discovery.
+ */
+export interface ExternalDiscoveryOptions {
+  /** Paths configured by the user in ecosystemGraph.externalPaths */
+  externalPaths: string[];
+  /** Whether to include ~/.kiro/ global steerings */
+  includeGlobal: boolean;
+  /** Timeout per path in ms (default: 5000) */
+  timeoutMs?: number;
+  /** Max files per path (default: 1000) */
+  maxFilesPerPath?: number;
+}
+
+/**
+ * Result of external filesystem discovery.
+ */
+export interface ExternalDiscoveryResult {
+  /** Discovered ecosystem files */
+  files: EcosystemFile[];
+  /** Paths that were skipped (timeout or non-existent) */
+  skippedPaths: { path: string; reason: string }[];
+}
+
+/**
+ * In-memory cache for external discovery results.
+ */
+export interface ExternalPathCache {
+  /** Map of configured path → discovered files */
+  entries: Map<string, EcosystemFile[]>;
+  /** Timestamp of last update */
+  lastUpdated: number;
+  /** Hash of the configuration that generated this cache */
+  configHash: string;
+}
+
+/**
+ * Result of resolving an external path reference.
+ */
+export interface ExternalResolutionResult {
+  /** Normalized absolute path (POSIX) */
+  absolutePath: string;
+  /** Whether the file exists on the filesystem */
+  exists: boolean;
+  /** Derived workspace name from the path */
+  derivedWorkspace: string;
+  /** Source type */
+  source: NodeSource;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // File Discovery
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -35,6 +102,8 @@ export interface EcosystemFile {
   relativePath: string;
   /** File category determining which parsing strategy to apply */
   category: FileCategory;
+  /** Provenance of this file (local, external-configured, external-resolved, global) */
+  source?: NodeSource;
 }
 
 /**
@@ -108,6 +177,8 @@ export interface GraphNode {
   filePath: string;
   /** Whether the file exists on disk (false for unresolved reference targets) */
   resolved: boolean;
+  /** Provenance of this node */
+  source: NodeSource;
   /** Optional metadata extracted from front-matter or other sources */
   metadata?: {
     /** Steering file inclusion mode: always, auto, fileMatch, or manual */
@@ -298,6 +369,19 @@ export interface CognitiveAnalysisResult {
   qualityGate: QualityGateResult;
   /** DML protection maturity assessment */
   dmlProtection: DmlProtectionResult;
+
+  /** Broken external links (external nodes with resolved: false) */
+  brokenExternalLinks?: { id: string; label: string; targetPath: string }[];
+
+  /** Cross-workspace topology status */
+  crossWorkspaceTopology?: {
+    workspace: string;
+    source: NodeSource;
+    totalNodes: number;
+    resolvedNodes: number;
+    unresolvedNodes: number;
+    status: 'connected' | 'partially-connected';
+  }[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

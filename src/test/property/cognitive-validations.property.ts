@@ -31,6 +31,7 @@ function makeNode(id: string, overrides: Partial<GraphNode> = {}): GraphNode {
     workspaceFolder: 'Workspace',
     filePath: id,
     resolved: true,
+    source: 'local',
     ...overrides,
   };
 }
