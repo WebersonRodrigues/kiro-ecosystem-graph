@@ -458,3 +458,67 @@ describe('MarkdownReportGenerator', function () {
       assert.ok(report.includes('| Circular Hook Dependencies | 2 |'));
     });
   });
+
+  describe('Guardrail Suggestions section', function () {
+    it('generates section with valid suggestions', function () {
+      const data = createMinimalResult();
+      data.guardrailCoverage = {
+        categories: [
+          { category: 'database', maturityLevel: 1, hasHook: true, hasSteering: false, isRelevant: true, suggestion: { text: 'Consider adding a steering with database conventions and guardrails', missing: 'steering', example: 'Create a steering file with database protection rules' } },
+          { category: 'deploy', maturityLevel: 2, hasHook: true, hasSteering: true, isRelevant: true },
+          { category: 'secrets', maturityLevel: 0, hasHook: false, hasSteering: false, isRelevant: false },
+          { category: 'tests', maturityLevel: 0, hasHook: false, hasSteering: false, isRelevant: true, suggestion: { text: 'Consider adding both a hook and a steering for tests protection', missing: 'both', example: 'Create a preToolUse hook + steering with tests rules' } },
+          { category: 'infrastructure', maturityLevel: 0, hasHook: false, hasSteering: false, isRelevant: false },
+        ],
+        overallMaturity: 1,
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('## Guardrail Suggestions'));
+      assert.ok(report.includes('These are improvement suggestions, not problems'));
+      assert.ok(report.includes('| database | 1/2 | hook | steering |'));
+      assert.ok(report.includes('| tests | 0/2 | none | both |'));
+      assert.ok(!report.includes('| deploy |'));
+      assert.ok(!report.includes('| secrets |'));
+    });
+
+    it('omits section when guardrailCoverage is undefined', function () {
+      const data = createMinimalResult();
+      const report = generateCognitiveReport(data);
+      assert.ok(!report.includes('## Guardrail Suggestions'));
+    });
+
+    it('omits section when all categories at level 2', function () {
+      const data = createMinimalResult();
+      data.guardrailCoverage = {
+        categories: [
+          { category: 'database', maturityLevel: 2, hasHook: true, hasSteering: true, isRelevant: true },
+          { category: 'deploy', maturityLevel: 2, hasHook: true, hasSteering: true, isRelevant: true },
+          { category: 'secrets', maturityLevel: 2, hasHook: true, hasSteering: true, isRelevant: true },
+          { category: 'tests', maturityLevel: 2, hasHook: true, hasSteering: true, isRelevant: true },
+          { category: 'infrastructure', maturityLevel: 2, hasHook: true, hasSteering: true, isRelevant: true },
+        ],
+        overallMaturity: 2,
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(!report.includes('## Guardrail Suggestions'));
+    });
+
+    it('informational note is present in header', function () {
+      const data = createMinimalResult();
+      data.guardrailCoverage = {
+        categories: [
+          { category: 'database', maturityLevel: 0, hasHook: false, hasSteering: false, isRelevant: true, suggestion: { text: 'Consider adding both a hook and a steering for database protection', missing: 'both', example: 'example' } },
+          { category: 'deploy', maturityLevel: 0, hasHook: false, hasSteering: false, isRelevant: false },
+          { category: 'secrets', maturityLevel: 0, hasHook: false, hasSteering: false, isRelevant: false },
+          { category: 'tests', maturityLevel: 0, hasHook: false, hasSteering: false, isRelevant: false },
+          { category: 'infrastructure', maturityLevel: 0, hasHook: false, hasSteering: false, isRelevant: false },
+        ],
+        overallMaturity: 0,
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('These are improvement suggestions, not problems. They do not affect the Health Score.'));
+    });
+  });

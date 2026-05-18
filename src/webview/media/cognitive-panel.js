@@ -1093,6 +1093,80 @@ var CognitivePanel = (function () {
     return imperativePattern.test(content);
   }
 
+  // ─── Guardrail Coverage Analysis (Rule 23) ─────────────────────────────
+
+  var GUARDRAIL_RISK_PATTERNS_WV = {
+    database: {
+      hookPatterns: ['sql', 'database', 'query', 'dml', 'migration'],
+      steeringPatterns: ['database', 'sql', 'banco', 'dados', 'migration', 'query'],
+    },
+    deploy: {
+      hookPatterns: ['deploy', 'publish', 'push', 'release', 'ship'],
+      steeringPatterns: ['deploy', 'release', 'publish', 'publicação', 'ship', 'rollback'],
+    },
+    secrets: {
+      hookPatterns: ['write', 'file', 'create'],
+      steeringPatterns: ['secret', 'credential', 'env', 'token', 'password', 'chave', 'segredo', 'api-key'],
+    },
+    tests: {
+      hookPatterns: ['test', 'coverage', 'teste', 'cobertura'],
+      steeringPatterns: ['test', 'testing', 'tdd', 'coverage', 'teste', 'cobertura'],
+    },
+    infrastructure: {
+      hookPatterns: ['terraform', 'docker', 'k8s', 'kubernetes', 'cloudformation', 'ansible', 'helm'],
+      steeringPatterns: ['infra', 'infrastructure', 'terraform', 'docker', 'kubernetes', 'cloud', 'devops'],
+    },
+  };
+
+  var ALL_RISK_CATEGORIES_WV = ['database', 'deploy', 'secrets', 'tests', 'infrastructure'];
+
+  function checkHookForCategoryWv(nodes, category) {
+    var patterns = GUARDRAIL_RISK_PATTERNS_WV[category].hookPatterns;
+    return nodes.some(function(n) {
+      if (n.type !== 'hook-auto' && n.type !== 'hook-manual') { return false; }
+      var desc = ((n.metadata && n.metadata.description) || '').toLowerCase();
+      var prompt = ((n.metadata && n.metadata.hookPrompt) || '').toLowerCase();
+      var label = n.label.toLowerCase();
+      return patterns.some(function(p) { return desc.indexOf(p) !== -1 || prompt.indexOf(p) !== -1 || label.indexOf(p) !== -1; });
+    });
+  }
+
+  function checkSteeringForCategoryWv(nodes, category) {
+    var patterns = GUARDRAIL_RISK_PATTERNS_WV[category].steeringPatterns;
+    return nodes.some(function(n) {
+      if (!n.type || n.type.indexOf('steering-') !== 0) { return false; }
+      var keywords = ((n.metadata && n.metadata.keywords) || []).map(function(k) { return k.toLowerCase(); });
+      var label = n.label.toLowerCase();
+      return patterns.some(function(p) { return keywords.indexOf(p) !== -1 || label.indexOf(p) !== -1; });
+    });
+  }
+
+  function isCategoryRelevantWv(nodes, category, dmlLevel) {
+    if (category === 'database' && (dmlLevel || 0) >= 1) { return false; }
+    if (category === 'tests') {
+      return nodes.some(function(n) { return n.type === 'hook-auto' || n.type === 'hook-manual'; });
+    }
+    return checkHookForCategoryWv(nodes, category) || checkSteeringForCategoryWv(nodes, category);
+  }
+
+  function analyzeGuardrailCoverageWebview(nodes, dmlLevel) {
+    var categories = ALL_RISK_CATEGORIES_WV.map(function(category) {
+      var hasHook = checkHookForCategoryWv(nodes, category);
+      var hasSteering = checkSteeringForCategoryWv(nodes, category);
+      var isRelevant = isCategoryRelevantWv(nodes, category, dmlLevel);
+      var maturityLevel = (hasHook && hasSteering) ? 2 : (hasHook || hasSteering) ? 1 : 0;
+      var suggestion = undefined;
+      if (isRelevant && maturityLevel < 2) {
+        var missing = (!hasHook && !hasSteering) ? 'both' : !hasHook ? 'hook' : 'steering';
+        suggestion = { text: 'Consider adding ' + missing + ' for ' + category + ' protection', missing: missing, example: '' };
+      }
+      return { category: category, maturityLevel: maturityLevel, hasHook: hasHook, hasSteering: hasSteering, isRelevant: isRelevant, suggestion: suggestion };
+    });
+    var relevant = categories.filter(function(c) { return c.isRelevant; });
+    var overallMaturity = relevant.length > 0 ? relevant.reduce(function(s, c) { return s + c.maturityLevel; }, 0) / relevant.length : 0;
+    return { categories: categories, overallMaturity: overallMaturity };
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Health Score Computation
   // ─────────────────────────────────────────────────────────────────────────
@@ -1385,6 +1459,9 @@ var CognitivePanel = (function () {
     // 15. Circular Hook Dependencies (Rule 22)
     var circularHookDependencies = detectCircularHookDependenciesWebview(data.nodes, data.links);
 
+    // 16. Guardrail Coverage Analysis (Rule 23)
+    var guardrailCoverage = analyzeGuardrailCoverageWebview(data.nodes, dmlProtection.maturityLevel);
+
     // 11. Cross-Workspace Topology: group external nodes by workspace
     var crossWorkspaceTopology = [];
     var workspaceGroups = {};
@@ -1485,6 +1562,7 @@ var CognitivePanel = (function () {
       suggestedConnections: suggestedConnections,
       semanticCoherence: semanticCoherence,
       circularHookDependencies: circularHookDependencies,
+      guardrailCoverage: guardrailCoverage,
       healthScore: computeHealthScore({
         steeringsSoltos: steeringsSoltos,
         vinculosFrageis: vinculosFrageis,
@@ -2102,6 +2180,27 @@ var CognitivePanel = (function () {
         html += '<div style="padding-left:6px;color:#666;font-size:9px;">...and ' + (analysis.circularHookDependencies.length - 5) + ' more</div>';
       }
       html += '</div>';
+    }
+
+    // Guardrail Suggestions (Rule 23)
+    if (analysis.guardrailCoverage && analysis.guardrailCoverage.categories) {
+      var guardrailSuggestions = analysis.guardrailCoverage.categories.filter(function(c) {
+        return c.isRelevant && c.maturityLevel < 2 && c.suggestion;
+      });
+      if (guardrailSuggestions.length > 0) {
+        html += '<div style="margin-bottom:6px;border-top:1px solid #333;padding-top:6px;">';
+        html += '<span style="color:#42A5F5;font-weight:bold;">\uD83D\uDCA1 Guardrail Suggestions</span>';
+        html += ' <span style="color:#42A5F5;">' + guardrailSuggestions.length + '</span>';
+        guardrailSuggestions.forEach(function(cat) {
+          var levelColor = cat.maturityLevel === 0 ? '#90CAF9' : '#64B5F6';
+          var present = cat.hasHook ? 'hook' : cat.hasSteering ? 'steering' : 'none';
+          html += '<div style="padding-left:6px;color:#90CAF9;font-size:9px;">';
+          html += '<strong>' + escapeHtml(cat.category) + '</strong> (level ' + cat.maturityLevel + ')';
+          html += ' <span style="color:#666;">present: ' + present + ', missing: ' + escapeHtml(cat.suggestion.missing) + '</span>';
+          html += '</div>';
+        });
+        html += '</div>';
+      }
     }
 
     // Suggestions

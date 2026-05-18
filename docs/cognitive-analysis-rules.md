@@ -472,8 +472,6 @@ review-hook.json (hook-auto) → code-conventions.md (steering-policy) → lint-
 
 ---
 
-## Visual Summary
-
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    COGNITIVE ANALYSIS                            │
@@ -510,4 +508,56 @@ review-hook.json (hook-auto) → code-conventions.md (steering-policy) → lint-
 
 ---
 
-*Version: 0.2.2 | 22 analysis rules | 207 automated tests*
+*Version: 0.3.0 | 23 analysis rules*
+
+
+---
+
+### 23. Guardrail Coverage Analysis (Improvement Suggestions)
+
+**What it checks:** Whether the ecosystem has adequate guardrails (hooks + steerings) for 5 operational risk categories: database operations, deploy/publish, secrets exposure, code without tests, and infrastructure changes.
+
+**Why it matters:** Each risk category benefits from a combination of a hook (automated gate) and a steering (decision criteria). Without both, the agent either acts without criteria or has criteria that are never enforced automatically.
+
+**Risk Categories:**
+
+| Category | Hook Patterns | Steering Patterns |
+|----------|--------------|-------------------|
+| database | sql, database, query, dml, migration | database, sql, banco, dados, migration, query |
+| deploy | deploy, publish, push, release, ship | deploy, release, publish, publicação, ship, rollback |
+| secrets | write, file, create | secret, credential, env, token, password, chave, segredo, api-key |
+| tests | test, coverage, teste, cobertura | test, testing, tdd, coverage, teste, cobertura |
+| infrastructure | terraform, docker, k8s, kubernetes, cloudformation, ansible, helm | infra, infrastructure, terraform, docker, kubernetes, cloud, devops |
+
+**Maturity Levels:**
+
+| Level | Name | Meaning |
+|-------|------|---------|
+| 0 | No Coverage | Neither hook nor steering present for this category. |
+| 1 | Partial | Has hook OR steering, but not both integrated. |
+| 2 | Complete | Has both hook AND steering for this category. |
+
+**Contextual Filtering:**
+- Categories are only flagged when the ecosystem shows evidence of relevant activity
+- Database category is skipped when DML Protection (Rule 18) already has maturity >= 1
+- Tests category is relevant whenever the ecosystem has at least one hook
+
+**Important:** This rule produces SUGGESTIONS only, not errors. Results do not affect the Health Score.
+
+**Example:**
+```
+database: Level 2 (Complete) — hook ✓ steering ✓
+deploy:   Level 1 (Partial)  — hook ✓ steering ✗
+  💡 Consider adding a steering with deploy conventions and guardrails
+secrets:  Level 0 (None)     — not relevant (no secrets-related content)
+tests:    Level 0 (None)     — hook ✗ steering ✗
+  💡 Consider adding both a hook and a steering for tests protection
+infrastructure: Level 0 (None) — not relevant (no infra-related content)
+```
+
+**Impact:** Without guardrails, the agent can perform risky operations without validation. With complete coverage, every risky operation is assessed before execution.
+
+**How to improve:**
+1. For missing hooks: Create a `preToolUse` or `postToolUse` hook with relevant toolTypes
+2. For missing steerings: Create a steering with protection rules and decision criteria
+3. For missing both: Start with the steering (criteria), then add the hook (enforcement)

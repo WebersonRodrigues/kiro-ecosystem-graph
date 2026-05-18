@@ -401,6 +401,9 @@ export interface CognitiveAnalysisResult {
 
   /** Circular dependencies between hooks and steerings (Rule 22) */
   circularHookDependencies?: CircularHookDependency[];
+
+  /** Guardrail coverage analysis — improvement suggestions (Rule 23) */
+  guardrailCoverage?: GuardrailCoverageResult;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -463,6 +466,47 @@ export interface CircularHookDependency {
   nodes: { id: string; label: string; type: string }[];
   /** Number of nodes in the cycle */
   cycleLength: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Guardrail Coverage Analysis Types (Rule 23)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Risk categories analyzed for guardrail coverage */
+export type GuardrailRiskCategory = 'database' | 'deploy' | 'secrets' | 'tests' | 'infrastructure';
+
+/** A guardrail improvement suggestion */
+export interface GuardrailSuggestion {
+  /** Human-readable suggestion text (framed as "Consider adding...") */
+  text: string;
+  /** What component is missing: 'hook', 'steering', or 'both' */
+  missing: 'hook' | 'steering' | 'both';
+  /** Concrete example of what to create */
+  example: string;
+}
+
+/** Result for a single risk category */
+export interface GuardrailCategoryResult {
+  /** Risk category name */
+  category: GuardrailRiskCategory;
+  /** Maturity level: 0=None, 1=Partial, 2=Complete */
+  maturityLevel: 0 | 1 | 2;
+  /** Whether a relevant hook was found */
+  hasHook: boolean;
+  /** Whether a relevant steering was found */
+  hasSteering: boolean;
+  /** Whether this category is relevant to the current ecosystem */
+  isRelevant: boolean;
+  /** Suggestion text (only when maturityLevel < 2 and isRelevant) */
+  suggestion?: GuardrailSuggestion;
+}
+
+/** Complete guardrail coverage analysis result */
+export interface GuardrailCoverageResult {
+  /** Per-category analysis results */
+  categories: GuardrailCategoryResult[];
+  /** Average maturity of relevant categories (0-2 scale) */
+  overallMaturity: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -472,6 +472,57 @@ review-hook.json (hook-auto) → code-conventions.md (steering-policy) → lint-
 
 ---
 
+### 23. Guardrail Coverage Analysis (Análise de Cobertura de Guardrails)
+
+**O que verifica:** Se o ecossistema possui guardrails adequados (hooks + steerings) para 5 categorias de risco operacional: operações de banco de dados, deploy/publicação, exposição de segredos, código sem testes e mudanças de infraestrutura.
+
+**Por que importa:** Cada categoria de risco se beneficia de uma combinação de hook (gate automatizado) e steering (critérios de decisão). Sem ambos, o agente age sem critérios ou tem critérios que nunca são aplicados automaticamente.
+
+**Categorias de Risco:**
+
+| Categoria | Padrões de Hook | Padrões de Steering |
+|-----------|----------------|---------------------|
+| database | sql, database, query, dml, migration | database, sql, banco, dados, migration, query |
+| deploy | deploy, publish, push, release, ship | deploy, release, publish, publicação, ship, rollback |
+| secrets | write, file, create | secret, credential, env, token, password, chave, segredo, api-key |
+| tests | test, coverage, teste, cobertura | test, testing, tdd, coverage, teste, cobertura |
+| infrastructure | terraform, docker, k8s, kubernetes, cloudformation, ansible, helm | infra, infrastructure, terraform, docker, kubernetes, cloud, devops |
+
+**Níveis de Maturidade:**
+
+| Nível | Nome | Significado |
+|-------|------|-------------|
+| 0 | Sem Cobertura | Nem hook nem steering presente para esta categoria. |
+| 1 | Parcial | Tem hook OU steering, mas não ambos integrados. |
+| 2 | Completa | Tem hook E steering para esta categoria. |
+
+**Filtragem Contextual:**
+- Categorias só são sinalizadas quando o ecossistema mostra evidência de atividade relevante
+- Categoria database é ignorada quando DML Protection (Regra 18) já tem maturidade >= 1
+- Categoria tests é relevante sempre que o ecossistema tem pelo menos um hook
+
+**Importante:** Esta regra produz apenas SUGESTÕES, não erros. Os resultados NÃO afetam o Health Score.
+
+**Exemplo:**
+```
+database: Nível 2 (Completa) — hook ✓ steering ✓
+deploy:   Nível 1 (Parcial)  — hook ✓ steering ✗
+  💡 Considere adicionar um steering com convenções e guardrails de deploy
+secrets:  Nível 0 (Nenhum)   — não relevante (sem conteúdo de secrets)
+tests:    Nível 0 (Nenhum)   — hook ✗ steering ✗
+  💡 Considere adicionar hook e steering para proteção de testes
+infrastructure: Nível 0 (Nenhum) — não relevante (sem conteúdo de infra)
+```
+
+**Impacto:** Sem guardrails, o agente pode executar operações arriscadas sem validação. Com cobertura completa, toda operação arriscada é avaliada antes da execução.
+
+**Como melhorar:**
+1. Para hooks faltantes: Crie um hook `preToolUse` ou `postToolUse` com toolTypes relevantes
+2. Para steerings faltantes: Crie um steering com regras de proteção e critérios de decisão
+3. Para ambos faltantes: Comece pelo steering (critérios), depois adicione o hook (enforcement)
+
+---
+
 ## Resumo Visual
 
 ```
@@ -510,4 +561,4 @@ review-hook.json (hook-auto) → code-conventions.md (steering-policy) → lint-
 
 ---
 
-*Versão: 0.2.2 | 22 regras de análise | 207 testes automatizados*
+*Versão: 0.3.0 | 23 regras de análise*

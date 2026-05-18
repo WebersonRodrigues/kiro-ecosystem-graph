@@ -23,6 +23,10 @@ import type {
   LinkSuggestion,
   SemanticCoherenceAlert,
   CircularHookDependency,
+  GuardrailRiskCategory,
+  GuardrailCategoryResult,
+  GuardrailSuggestion,
+  GuardrailCoverageResult,
 } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1360,3 +1364,203 @@ function deduplicateAndFilter(
 
   return results;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Guardrail Coverage Analysis (Rule 23)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Pre-compiled keyword patterns for each risk category */
+export const GUARDRAIL_RISK_PATTERNS: Record<GuardrailRiskCategory, {
+  hookPatterns: string[];
+  steeringPatterns: string[];
+}> = {
+  database: {
+    hookPatterns: ['sql', 'database', 'query', 'dml', 'migration'],
+    steeringPatterns: ['database', 'sql', 'banco', 'dados', 'migration', 'query'],
+  },
+  deploy: {
+    hookPatterns: ['deploy', 'publish', 'push', 'release', 'ship'],
+    steeringPatterns: ['deploy', 'release', 'publish', 'publicação', 'ship', 'rollback'],
+  },
+  secrets: {
+    hookPatterns: ['write', 'file', 'create'],
+    steeringPatterns: ['secret', 'credential', 'env', 'token', 'password', 'chave', 'segredo', 'api-key'],
+  },
+  tests: {
+    hookPatterns: ['test', 'coverage', 'teste', 'cobertura'],
+    steeringPatterns: ['test', 'testing', 'tdd', 'coverage', 'teste', 'cobertura'],
+  },
+  infrastructure: {
+    hookPatterns: ['terraform', 'docker', 'k8s', 'kubernetes', 'cloudformation', 'ansible', 'helm'],
+    steeringPatterns: ['infra', 'infrastructure', 'terraform', 'docker', 'kubernetes', 'cloud', 'devops'],
+  },
+};
+
+/** All risk categories in fixed order */
+const ALL_RISK_CATEGORIES: GuardrailRiskCategory[] = [
+  'database', 'deploy', 'secrets', 'tests', 'infrastructure',
+];
+
+/**
+ * Checks if a hook exists for the given risk category.
+ * Matches against whenType, hookPrompt, description, and label.
+ */
+export function checkHookForCategory(
+  nodes: GraphNode[],
+  category: GuardrailRiskCategory,
+): boolean {
+  const patterns = GUARDRAIL_RISK_PATTERNS[category].hookPatterns;
+  return nodes.some((n) => {
+    if (n.type !== 'hook-auto' && n.type !== 'hook-manual') { return false; }
+    return matchesHookPatterns(n, patterns);
+  });
+}
+
+function matchesHookPatterns(node: GraphNode, patterns: string[]): boolean {
+  const desc = (node.metadata?.description || '').toLowerCase();
+  const prompt = (node.metadata?.hookPrompt || '').toLowerCase();
+  const label = node.label.toLowerCase();
+  return patterns.some((p) =>
+    desc.includes(p) || prompt.includes(p) || label.includes(p),
+  );
+}
+
+/**
+ * Checks if a steering exists for the given risk category.
+ * Matches against keywords and label.
+ */
+export function checkSteeringForCategory(
+  nodes: GraphNode[],
+  category: GuardrailRiskCategory,
+): boolean {
+  const patterns = GUARDRAIL_RISK_PATTERNS[category].steeringPatterns;
+  return nodes.some((n) => {
+    if (!n.type || !n.type.startsWith('steering-')) { return false; }
+    return matchesSteeringPatterns(n, patterns);
+  });
+}
+
+function matchesSteeringPatterns(node: GraphNode, patterns: string[]): boolean {
+  const keywords = (node.metadata?.keywords || []).map((k) => k.toLowerCase());
+  const label = node.label.toLowerCase();
+  return patterns.some((p) => keywords.includes(p) || label.includes(p));
+}
+
+/**
+ * Determines if a risk category is relevant to the current ecosystem.
+ * Database is skipped when DML Protection already covers it.
+ */
+export function isCategoryRelevant(
+  nodes: GraphNode[],
+  category: GuardrailRiskCategory,
+  dmlProtectionLevel?: number,
+): boolean {
+  if (category === 'database' && (dmlProtectionLevel ?? 0) >= 1) {
+    return false;
+  }
+  if (category === 'tests') {
+    return nodes.some((n) => n.type === 'hook-auto' || n.type === 'hook-manual');
+  }
+  const hasHook = checkHookForCategory(nodes, category);
+  const hasSteering = checkSteeringForCategory(nodes, category);
+  return hasHook || hasSteering;
+}
+
+/**
+ * Generates a positively-framed suggestion for a risk category.
+ */
+export function generateGuardrailSuggestion(
+  category: GuardrailRiskCategory,
+  missing: 'hook' | 'steering' | 'both',
+): GuardrailSuggestion {
+  const texts = buildSuggestionTexts(category, missing);
+  return { text: texts.text, missing, example: texts.example };
+}
+
+function buildSuggestionTexts(
+  category: GuardrailRiskCategory,
+  missing: 'hook' | 'steering' | 'both',
+): { text: string; example: string } {
+  if (missing === 'hook') {
+    return {
+      text: `Consider adding a preToolUse/postToolUse hook for ${category} operations`,
+      example: `Create a hook with toolTypes matching ${category} patterns`,
+    };
+  }
+  if (missing === 'steering') {
+    return {
+      text: `Consider adding a steering with ${category} conventions and guardrails`,
+      example: `Create a steering file with ${category} protection rules`,
+    };
+  }
+  return {
+    text: `Consider adding both a hook and a steering for ${category} protection`,
+    example: `Create a preToolUse hook + steering with ${category} rules`,
+  };
+}
+
+function computeMaturityLevel(hasHook: boolean, hasSteering: boolean): 0 | 1 | 2 {
+  if (hasHook && hasSteering) { return 2; }
+  if (hasHook || hasSteering) { return 1; }
+  return 0;
+}
+
+/**
+ * Analyzes guardrail coverage across all 5 risk categories.
+ * Returns per-category results and overall maturity average.
+ *
+ * @param nodes - All graph nodes
+ * @param edges - All graph edges (unused but kept for API consistency)
+ * @param dmlProtectionLevel - Current DML Protection maturity level (to avoid overlap)
+ * @returns Complete guardrail coverage analysis result
+ */
+export function analyzeGuardrailCoverage(
+  nodes: GraphNode[],
+  _edges: GraphEdge[],
+  dmlProtectionLevel?: number,
+): GuardrailCoverageResult {
+  const categories = ALL_RISK_CATEGORIES.map((category) =>
+    analyzeCategory(nodes, category, dmlProtectionLevel),
+  );
+  const overallMaturity = computeOverallMaturity(categories);
+  return { categories, overallMaturity };
+}
+
+function analyzeCategory(
+  nodes: GraphNode[],
+  category: GuardrailRiskCategory,
+  dmlProtectionLevel?: number,
+): GuardrailCategoryResult {
+  const hasHook = checkHookForCategory(nodes, category);
+  const hasSteering = checkSteeringForCategory(nodes, category);
+  const isRelevant = isCategoryRelevant(nodes, category, dmlProtectionLevel);
+  const maturityLevel = computeMaturityLevel(hasHook, hasSteering);
+  const suggestion = buildCategorySuggestion(isRelevant, maturityLevel, hasHook, hasSteering, category);
+  return { category, maturityLevel, hasHook, hasSteering, isRelevant, suggestion };
+}
+
+function buildCategorySuggestion(
+  isRelevant: boolean,
+  maturityLevel: 0 | 1 | 2,
+  hasHook: boolean,
+  hasSteering: boolean,
+  category: GuardrailRiskCategory,
+): GuardrailSuggestion | undefined {
+  if (!isRelevant || maturityLevel >= 2) { return undefined; }
+  const missing = determineMissing(hasHook, hasSteering);
+  return generateGuardrailSuggestion(category, missing);
+}
+
+function determineMissing(hasHook: boolean, hasSteering: boolean): 'hook' | 'steering' | 'both' {
+  if (!hasHook && !hasSteering) { return 'both'; }
+  if (!hasHook) { return 'hook'; }
+  return 'steering';
+}
+
+function computeOverallMaturity(categories: GuardrailCategoryResult[]): number {
+  const relevant = categories.filter((c) => c.isRelevant);
+  if (relevant.length === 0) { return 0; }
+  const sum = relevant.reduce((acc, c) => acc + c.maturityLevel, 0);
+  return sum / relevant.length;
+}
+

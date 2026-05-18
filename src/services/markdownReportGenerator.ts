@@ -44,6 +44,7 @@ export function generateCognitiveReport(
   appendSuggestedConnections(lines, data);
   appendSemanticCoherence(lines, data);
   appendCircularHookDependencies(lines, data);
+  appendGuardrailSuggestions(lines, data);
   appendRecommendations(lines, data);
   appendInstructionsForAI(lines, data);
 
@@ -466,6 +467,33 @@ function appendCircularHookDependencies(lines: string[], data: CognitiveAnalysis
   lines.push('');
 }
 
+function appendGuardrailSuggestions(lines: string[], data: CognitiveAnalysisResult): void {
+  if (!data.guardrailCoverage) { return; }
+  const suggestions = data.guardrailCoverage.categories.filter(
+    (c) => c.isRelevant && c.maturityLevel < 2 && c.suggestion,
+  );
+  if (suggestions.length === 0) { return; }
+
+  lines.push('## Guardrail Suggestions');
+  lines.push('');
+  lines.push('> These are improvement suggestions, not problems. They do not affect the Health Score.');
+  lines.push('');
+  lines.push('| Risk Category | Maturity | Present | Missing | Suggestion |');
+  lines.push('|---------------|----------|---------|---------|------------|');
+  for (const cat of suggestions) {
+    const present = formatPresent(cat.hasHook, cat.hasSteering);
+    lines.push(`| ${cat.category} | ${cat.maturityLevel}/2 | ${present} | ${cat.suggestion!.missing} | ${cat.suggestion!.text} |`);
+  }
+  lines.push('');
+}
+
+function formatPresent(hasHook: boolean, hasSteering: boolean): string {
+  if (hasHook && hasSteering) { return 'hook + steering'; }
+  if (hasHook) { return 'hook'; }
+  if (hasSteering) { return 'steering'; }
+  return 'none';
+}
+
 function appendRecommendations(lines: string[], data: CognitiveAnalysisResult): void {
   if (data.sugestoes.length === 0) { return; }
   lines.push('## Recommendations');
@@ -546,6 +574,14 @@ function appendInstructionsForAI(lines: string[], data: CognitiveAnalysisResult)
   }
   if ((data.circularHookDependencies || []).length > 0) {
     lines.push(`${step++}. For each Circular Hook Dependency, break the circular reference by removing or redirecting one edge in the cycle.`);
+  }
+  if (data.guardrailCoverage) {
+    const hasSuggestions = data.guardrailCoverage.categories.some(
+      (c) => c.isRelevant && c.maturityLevel < 2 && c.suggestion,
+    );
+    if (hasSuggestions) {
+      lines.push(`${step++}. Consider implementing Guardrail Suggestions as optional improvements to strengthen ecosystem protection.`);
+    }
   }
 
   lines.push('');

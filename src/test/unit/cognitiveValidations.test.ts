@@ -934,3 +934,160 @@ describe('CognitiveValidations — detectCircularHookDependencies()', function (
     assert.strictEqual(result.length, 0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Guardrail Coverage Analysis (Rule 23)
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { analyzeGuardrailCoverage } from '../../services/cognitiveValidations';
+
+describe('CognitiveValidations — analyzeGuardrailCoverage()', function () {
+  it('database maturity 2: hook with sql + steering with database keyword', function () {
+    const nodes: GraphNode[] = [
+      makeNode('dml-hook.json', { type: 'hook-auto', metadata: { description: 'sql protection' } }),
+      makeNode('db-rules.md', { type: 'steering-tech', metadata: { keywords: ['database', 'backup'] } }),
+    ];
+    const result = analyzeGuardrailCoverage(nodes, []);
+    const db = result.categories.find((c) => c.category === 'database')!;
+    assert.strictEqual(db.maturityLevel, 2);
+    assert.strictEqual(db.hasHook, true);
+    assert.strictEqual(db.hasSteering, true);
+    assert.strictEqual(db.suggestion, undefined);
+  });
+
+  it('deploy maturity 2: hook with deploy + steering with release keyword', function () {
+    const nodes: GraphNode[] = [
+      makeNode('deploy-hook.json', { type: 'hook-auto', metadata: { description: 'deploy gate' } }),
+      makeNode('deploy-rules.md', { type: 'steering-tech', metadata: { keywords: ['release', 'rollback'] } }),
+    ];
+    const result = analyzeGuardrailCoverage(nodes, []);
+    const deploy = result.categories.find((c) => c.category === 'deploy')!;
+    assert.strictEqual(deploy.maturityLevel, 2);
+    assert.strictEqual(deploy.isRelevant, true);
+  });
+
+  it('secrets maturity 2: hook with write + steering with secret keyword', function () {
+    const nodes: GraphNode[] = [
+      makeNode('write-hook.json', { type: 'hook-auto', metadata: { description: 'file write guard' } }),
+      makeNode('secrets.md', { type: 'steering-policy', metadata: { keywords: ['secret', 'credential'] } }),
+    ];
+    const result = analyzeGuardrailCoverage(nodes, []);
+    const secrets = result.categories.find((c) => c.category === 'secrets')!;
+    assert.strictEqual(secrets.maturityLevel, 2);
+  });
+
+  it('tests maturity 2: hook with test + steering with testing keyword', function () {
+    const nodes: GraphNode[] = [
+      makeNode('test-hook.json', { type: 'hook-auto', metadata: { description: 'run test after task' } }),
+      makeNode('testing-guide.md', { type: 'steering-domain', metadata: { keywords: ['testing', 'tdd'] } }),
+    ];
+    const result = analyzeGuardrailCoverage(nodes, []);
+    const tests = result.categories.find((c) => c.category === 'tests')!;
+    assert.strictEqual(tests.maturityLevel, 2);
+  });
+
+  it('infrastructure maturity 2: hook with terraform + steering with infra keyword', function () {
+    const nodes: GraphNode[] = [
+      makeNode('infra-hook.json', { type: 'hook-auto', metadata: { description: 'terraform guard' } }),
+      makeNode('infra-rules.md', { type: 'steering-tech', metadata: { keywords: ['infrastructure', 'docker'] } }),
+    ];
+    const result = analyzeGuardrailCoverage(nodes, []);
+    const infra = result.categories.find((c) => c.category === 'infrastructure')!;
+    assert.strictEqual(infra.maturityLevel, 2);
+  });
+
+  it('maturity level 0: no components present for relevant category', function () {
+    const nodes: GraphNode[] = [
+      makeNode('some-hook.json', { type: 'hook-auto', metadata: { description: 'deploy check' } }),
+    ];
+    const result = analyzeGuardrailCoverage(nodes, []);
+    const deploy = result.categories.find((c) => c.category === 'deploy')!;
+    assert.strictEqual(deploy.maturityLevel, 1);
+    // tests is relevant (has hook) but no test-specific hook/steering
+    const tests = result.categories.find((c) => c.category === 'tests')!;
+    assert.strictEqual(tests.maturityLevel, 0);
+    assert.strictEqual(tests.isRelevant, true);
+    assert.ok(tests.suggestion !== undefined);
+  });
+
+  it('maturity level 1: only hook present', function () {
+    const nodes: GraphNode[] = [
+      makeNode('deploy-hook.json', { type: 'hook-auto', metadata: { description: 'deploy gate' } }),
+    ];
+    const result = analyzeGuardrailCoverage(nodes, []);
+    const deploy = result.categories.find((c) => c.category === 'deploy')!;
+    assert.strictEqual(deploy.maturityLevel, 1);
+    assert.strictEqual(deploy.hasHook, true);
+    assert.strictEqual(deploy.hasSteering, false);
+    assert.strictEqual(deploy.suggestion?.missing, 'steering');
+  });
+
+  it('maturity level 1: only steering present', function () {
+    const nodes: GraphNode[] = [
+      makeNode('deploy-rules.md', { type: 'steering-tech', metadata: { keywords: ['deploy', 'release'] } }),
+    ];
+    const result = analyzeGuardrailCoverage(nodes, []);
+    const deploy = result.categories.find((c) => c.category === 'deploy')!;
+    assert.strictEqual(deploy.maturityLevel, 1);
+    assert.strictEqual(deploy.hasHook, false);
+    assert.strictEqual(deploy.hasSteering, true);
+    assert.strictEqual(deploy.suggestion?.missing, 'hook');
+  });
+
+  it('contextual filtering: irrelevant category does not generate suggestion', function () {
+    const nodes: GraphNode[] = [
+      makeNode('generic.md', { type: 'steering-domain', metadata: { keywords: ['general'] } }),
+    ];
+    const result = analyzeGuardrailCoverage(nodes, []);
+    const infra = result.categories.find((c) => c.category === 'infrastructure')!;
+    assert.strictEqual(infra.isRelevant, false);
+    assert.strictEqual(infra.suggestion, undefined);
+  });
+
+  it('DML Protection overlap: database skipped when dmlProtectionLevel >= 1', function () {
+    const nodes: GraphNode[] = [
+      makeNode('dml-hook.json', { type: 'hook-auto', metadata: { description: 'sql protection' } }),
+      makeNode('db-rules.md', { type: 'steering-tech', metadata: { keywords: ['database'] } }),
+    ];
+    const result = analyzeGuardrailCoverage(nodes, [], 1);
+    const db = result.categories.find((c) => c.category === 'database')!;
+    assert.strictEqual(db.isRelevant, false);
+    assert.strictEqual(db.suggestion, undefined);
+  });
+
+  it('empty graph: returns 5 categories with isRelevant=false', function () {
+    const result = analyzeGuardrailCoverage([], []);
+    assert.strictEqual(result.categories.length, 5);
+    assert.strictEqual(result.overallMaturity, 0);
+    result.categories.forEach((c) => {
+      assert.strictEqual(c.isRelevant, false);
+      assert.strictEqual(c.suggestion, undefined);
+    });
+  });
+
+  it('suggestion text does not contain error language', function () {
+    const nodes: GraphNode[] = [
+      makeNode('deploy-hook.json', { type: 'hook-auto', metadata: { description: 'deploy gate' } }),
+    ];
+    const result = analyzeGuardrailCoverage(nodes, []);
+    result.categories.forEach((c) => {
+      if (c.suggestion) {
+        const text = c.suggestion.text.toLowerCase();
+        assert.ok(!text.includes('error'));
+        assert.ok(!text.includes('warning'));
+        assert.ok(!text.includes('problem'));
+      }
+    });
+  });
+
+  it('overallMaturity is calculated only over relevant categories', function () {
+    const nodes: GraphNode[] = [
+      makeNode('deploy-hook.json', { type: 'hook-auto', metadata: { description: 'deploy gate' } }),
+      makeNode('deploy-rules.md', { type: 'steering-tech', metadata: { keywords: ['deploy'] } }),
+    ];
+    const result = analyzeGuardrailCoverage(nodes, []);
+    const relevant = result.categories.filter((c) => c.isRelevant);
+    const expected = relevant.reduce((s, c) => s + c.maturityLevel, 0) / relevant.length;
+    assert.strictEqual(result.overallMaturity, expected);
+  });
+});
