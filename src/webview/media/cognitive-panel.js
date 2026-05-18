@@ -1783,7 +1783,6 @@ var CognitivePanel = (function () {
       html += '<div style="font-size:9px;color:#ccc;margin-bottom:4px;">';
       html += '<span style="color:#FF9800;">Next:</span> ' + escapeHtml(nextStep.description);
       html += '</div>';
-      html += '<button id="onboarding-create-btn" data-template="' + escapeAttr(nextStep.templateKey) + '" data-filename="' + escapeAttr(nextStep.fileName) + '" data-targetdir="' + escapeAttr(nextStep.targetDir) + '" style="background:#2a2a2a;color:#4A9EFF;border:1px solid #4A9EFF;border-radius:3px;font-size:9px;padding:3px 8px;cursor:pointer;width:100%;">Create from Template</button>';
     }
 
     html += '</div>'; // onboarding-body
@@ -2458,20 +2457,7 @@ var CognitivePanel = (function () {
       });
     }
 
-    // Wire "Create from Template" button
-    var createBtn = document.getElementById('onboarding-create-btn');
-    if (createBtn) {
-      createBtn.addEventListener('click', function() {
-        if (typeof vscode !== 'undefined') {
-          vscode.postMessage({
-            type: 'createFromTemplate',
-            templateKey: createBtn.getAttribute('data-template'),
-            fileName: createBtn.getAttribute('data-filename'),
-            targetDir: createBtn.getAttribute('data-targetdir'),
-          });
-        }
-      });
-    }
+    // Wire Fix buttons (onboarding "Create from Template" removed — suggestion is informational only)
   }
 
   // ─────────────────────────────────────────────────────────────────────────
