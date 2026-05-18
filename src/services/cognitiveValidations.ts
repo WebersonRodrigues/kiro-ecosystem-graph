@@ -515,8 +515,14 @@ export function computeDmlProtectionLevel(
 export function computeContextOverload(
   nodes: GraphNode[],
   threshold: number = 350,
-): { overloaded: Array<{ id: string; label: string; lineCount: number }>; totalAlwaysLines: number } {
+  domainThreshold: number = 1000,
+): {
+  overloaded: Array<{ id: string; label: string; lineCount: number }>;
+  largeDomainSteerings: Array<{ id: string; label: string; lineCount: number }>;
+  totalAlwaysLines: number;
+} {
   const overloaded: Array<{ id: string; label: string; lineCount: number }> = [];
+  const largeDomainSteerings: Array<{ id: string; label: string; lineCount: number }> = [];
   let totalAlwaysLines = 0;
 
   for (const n of nodes) {
@@ -525,15 +531,17 @@ export function computeContextOverload(
     // SKIP fileMatch/manual — not always-loaded
     if (inclusion === 'fileMatch' || inclusion === 'manual') { continue; }
     const lineCount = (n.metadata && n.metadata.lineCount) || 0;
-    if (inclusion === 'always' || inclusion === 'auto') {
+    if (inclusion === 'always') {
       totalAlwaysLines += lineCount;
       if (lineCount > threshold) {
         overloaded.push({ id: n.id, label: n.label, lineCount });
       }
+    } else if (inclusion === 'auto' && lineCount > domainThreshold) {
+      largeDomainSteerings.push({ id: n.id, label: n.label, lineCount });
     }
   }
 
-  return { overloaded, totalAlwaysLines };
+  return { overloaded, largeDomainSteerings, totalAlwaysLines };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -726,4 +734,164 @@ export function computeFragileLinks(
   }
 
   return result;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Coverage Gaps
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Computes coverage gaps: workspace folders with no steering files.
+ *
+ * @param nodes - All graph nodes
+ * @param workspaceFolders - All workspace folder names
+ * @returns Array of folders with no steerings
+ */
+export function computeCoverageGaps(
+  nodes: GraphNode[],
+  workspaceFolders: string[],
+): Array<{ folder: string }> {
+  const folderSteeringCount: Record<string, number> = {};
+  for (const f of workspaceFolders) { folderSteeringCount[f] = 0; }
+  for (const n of nodes) {
+    if (n.type && n.type.startsWith('steering-') && n.workspaceFolder) {
+      if (folderSteeringCount[n.workspaceFolder] !== undefined) {
+        folderSteeringCount[n.workspaceFolder]++;
+      }
+    }
+  }
+  const gaps: Array<{ folder: string }> = [];
+  for (const f of workspaceFolders) {
+    if (folderSteeringCount[f] === 0) { gaps.push({ folder: f }); }
+  }
+  return gaps;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Weak Instructions
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Computes weak instructions: steering files with fewer lines than threshold.
+ * Skips steerings with lineCount 0 or undefined (no data available).
+ *
+ * @param nodes - All graph nodes
+ * @param threshold - Line count threshold (default 10)
+ * @returns Array of weak steerings
+ */
+export function computeWeakInstructions(
+  nodes: GraphNode[],
+  threshold: number = 10,
+): Array<{ id: string; label: string; lineCount: number }> {
+  const weak: Array<{ id: string; label: string; lineCount: number }> = [];
+  for (const n of nodes) {
+    if (!n.type || !n.type.startsWith('steering-')) { continue; }
+    const lineCount = (n.metadata && n.metadata.lineCount) || 0;
+    if (lineCount > 0 && lineCount < threshold) {
+      weak.push({ id: n.id, label: n.label, lineCount });
+    }
+  }
+  return weak;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Steerings Without Access
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Computes steerings without access: non-always/auto steerings that are not
+ * referenced by any hook. These steerings require a hook trigger to be loaded
+ * but have no hook pointing to them.
+ *
+ * @param nodes - All graph nodes
+ * @param edges - All graph edges
+ * @returns Array of steerings without access
+ */
+export function computeSteeringsWithoutAccess(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+): Array<{ id: string; label: string; inclusion: string }> {
+  const steeringIds = new Set<string>();
+  for (const n of nodes) {
+    if (n.type && n.type.startsWith('steering-')) { steeringIds.add(n.id); }
+  }
+
+  // Find steerings referenced by hooks
+  const steeringsReferencedByHooks = new Set<string>();
+  for (const e of edges) {
+    const sourceNode = nodes.find((n) => n.id === e.source);
+    if (sourceNode && (sourceNode.type === 'hook-auto' || sourceNode.type === 'hook-manual')) {
+      if (steeringIds.has(e.target)) {
+        steeringsReferencedByHooks.add(e.target);
+      }
+    }
+  }
+
+  const result: Array<{ id: string; label: string; inclusion: string }> = [];
+  for (const n of nodes) {
+    if (!n.type || !n.type.startsWith('steering-')) { continue; }
+    const inclusion = (n.metadata && n.metadata.inclusion) || 'always';
+    if (inclusion !== 'always' && inclusion !== 'auto' && !steeringsReferencedByHooks.has(n.id)) {
+      result.push({ id: n.id, label: n.label, inclusion });
+    }
+  }
+  return result;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Decision Path
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Computes decision path completeness: identifies hooks without steering
+ * references and decision-keyword steerings without hook triggers.
+ *
+ * @param nodes - All graph nodes
+ * @param edges - All graph edges
+ * @returns Object with hooksWithoutSteering and steeringsWithoutHook
+ */
+export function computeDecisionPath(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+): { hooksWithoutSteering: Array<{ id: string; label: string }>; steeringsWithoutHook: Array<{ id: string; label: string }> } {
+  const steeringIds = new Set<string>();
+  for (const n of nodes) {
+    if (n.type && n.type.startsWith('steering-')) { steeringIds.add(n.id); }
+  }
+
+  const hookToSteerings: Record<string, string[]> = {};
+  const steeringFromHooks = new Set<string>();
+  for (const e of edges) {
+    const sourceNode = nodes.find((n) => n.id === e.source);
+    if (sourceNode && (sourceNode.type === 'hook-auto' || sourceNode.type === 'hook-manual')) {
+      if (steeringIds.has(e.target)) {
+        if (!hookToSteerings[e.source]) { hookToSteerings[e.source] = []; }
+        hookToSteerings[e.source].push(e.target);
+        steeringFromHooks.add(e.target);
+      }
+    }
+  }
+
+  const hooksWithoutSteering: Array<{ id: string; label: string }> = [];
+  for (const n of nodes) {
+    if (n.type !== 'hook-auto' && n.type !== 'hook-manual') { continue; }
+    if (!hookToSteerings[n.id] || hookToSteerings[n.id].length === 0) {
+      hooksWithoutSteering.push({ id: n.id, label: n.label });
+    }
+  }
+
+  const DECISION_KEYWORDS = ['decide', 'choose', 'when', 'condition', 'criteria', 'decida', 'escolha', 'quando', 'condição', 'critério'];
+  const steeringsWithoutHook: Array<{ id: string; label: string }> = [];
+  for (const n of nodes) {
+    if (!n.type || !n.type.startsWith('steering-')) { continue; }
+    const inclusion = (n.metadata && n.metadata.inclusion) || 'always';
+    if (inclusion === 'always' || inclusion === 'auto') { continue; }
+    const keywords = (n.metadata && n.metadata.keywords) || [];
+    const hasDecision = keywords.some((kw: string) => DECISION_KEYWORDS.includes(kw.toLowerCase()));
+    if (hasDecision && !steeringFromHooks.has(n.id)) {
+      steeringsWithoutHook.push({ id: n.id, label: n.label });
+    }
+  }
+
+  return { hooksWithoutSteering, steeringsWithoutHook };
 }

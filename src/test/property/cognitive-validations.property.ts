@@ -782,20 +782,56 @@ describe('Preservation — Context Overload keeps always/auto steerings (Propert
    * For any steering with inclusion always or auto and lineCount > 350,
    * computeContextOverload MUST include it in the result.
    */
-  it('steerings with always/auto inclusion and >350 lines ARE in overload', function () {
-    const inclusionArb = fc.constantFrom('always', 'auto');
+  it('steerings with always inclusion and >350 lines ARE in overload', function () {
     const lineCountArb = fc.integer({ min: 351, max: 5000 });
 
     fc.assert(
-      fc.property(inclusionArb, lineCountArb, (inclusion, lineCount) => {
+      fc.property(lineCountArb, (lineCount) => {
         const node = makeNode('big-steering.md', {
           type: 'steering-domain',
-          metadata: { inclusion, lineCount },
+          metadata: { inclusion: 'always', lineCount },
         });
         const result = computeContextOverload([node]);
         assert.strictEqual(result.overloaded.length, 1,
-          `Steering with inclusion=${inclusion} and ${lineCount} lines should be in overload`);
+          `Steering with inclusion=always and ${lineCount} lines should be in overload`);
         assert.strictEqual(result.totalAlwaysLines, lineCount);
+      }),
+      { numRuns: 50 },
+    );
+  });
+
+  it('steerings with auto inclusion and >1000 lines ARE in largeDomainSteerings', function () {
+    const lineCountArb = fc.integer({ min: 1001, max: 5000 });
+
+    fc.assert(
+      fc.property(lineCountArb, (lineCount) => {
+        const node = makeNode('domain-steering.md', {
+          type: 'steering-domain',
+          metadata: { inclusion: 'auto', lineCount },
+        });
+        const result = computeContextOverload([node]);
+        assert.strictEqual(result.overloaded.length, 0,
+          `Auto steering should NOT be in overload`);
+        assert.strictEqual(result.largeDomainSteerings.length, 1,
+          `Auto steering with ${lineCount} lines should be in largeDomainSteerings`);
+        assert.strictEqual(result.totalAlwaysLines, 0);
+      }),
+      { numRuns: 50 },
+    );
+  });
+
+  it('steerings with auto inclusion and <=1000 lines are NOT flagged', function () {
+    const lineCountArb = fc.integer({ min: 100, max: 1000 });
+
+    fc.assert(
+      fc.property(lineCountArb, (lineCount) => {
+        const node = makeNode('small-domain.md', {
+          type: 'steering-domain',
+          metadata: { inclusion: 'auto', lineCount },
+        });
+        const result = computeContextOverload([node]);
+        assert.strictEqual(result.overloaded.length, 0);
+        assert.strictEqual(result.largeDomainSteerings.length, 0);
       }),
       { numRuns: 50 },
     );

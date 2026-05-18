@@ -953,20 +953,25 @@ var CognitivePanel = (function () {
       }
     });
 
-    // 6. Context Overload: always-included steerings that may overflow the context window
+    // 6. Context Overload: only always-loaded steerings count for overload
+    //    auto steerings alert separately at 1000+ lines (modularization opportunity)
     var contextOverload = [];
     var totalAlwaysLines = 0;
+    var largeDomainSteerings = [];
     data.nodes.forEach(function(n) {
       if (n.type && n.type.indexOf('steering-') === 0) {
         var inclusion = (n.metadata && n.metadata.inclusion) || 'always';
         var lineCount = (n.metadata && n.metadata.lineCount) || 0;
         // Exclude fileMatch/manual — not always-loaded
         if (inclusion === 'fileMatch' || inclusion === 'manual') { return; }
-        if (inclusion === 'always' || inclusion === 'auto') {
+        if (inclusion === 'always') {
           totalAlwaysLines += lineCount;
           if (lineCount > 350) {
             contextOverload.push({ id: n.id, label: n.label, lineCount: lineCount });
           }
+        } else if (inclusion === 'auto' && lineCount > 1000) {
+          // Auto steerings: only alert at 1000+ lines (modularization opportunity)
+          largeDomainSteerings.push({ id: n.id, label: n.label, lineCount: lineCount });
         }
       }
     });
@@ -1036,6 +1041,9 @@ var CognitivePanel = (function () {
     }
     if (contextOverload.length > 0) {
       sugestoes.push('Break down ' + contextOverload.length + ' large always-loaded steering(s) (350+ lines) into smaller focused files to avoid context window overflow.');
+    }
+    if (largeDomainSteerings.length > 0) {
+      sugestoes.push(largeDomainSteerings.length + ' domain steering(s) exceed 1000 lines. Consider splitting into sub-steerings that reference each other, loading only what the context needs.');
     }
     if (totalAlwaysLines > 500) {
       sugestoes.push('Total always-loaded steering content is ' + totalAlwaysLines + ' lines — consider switching some to "inclusion: manual" or "inclusion: fileMatch" to reduce context window usage.');
@@ -1143,6 +1151,7 @@ var CognitivePanel = (function () {
       coverageGaps: coverageGaps,
       weakInstructions: weakInstructions,
       contextOverload: contextOverload,
+      largeDomainSteerings: largeDomainSteerings,
       totalAlwaysLines: totalAlwaysLines,
       hooksWithoutInstruction: hooksWithoutInstruction,
       steeringsWithoutAccess: steeringsWithoutAccess,

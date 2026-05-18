@@ -12,16 +12,18 @@ The goal is simple: **the more precise and well-connected the ecosystem, the mor
 
 ### 1. Orphan Steerings
 
-**What it checks:** Steerings with zero connections (no incoming or outgoing references).
+**What it checks:** Steerings with `inclusion: always` (or no frontmatter) that have zero connections (no incoming or outgoing references).
 
-**Why it matters:** An orphan steering is invisible to the agent. It exists on disk but is never reached — it's dead knowledge.
+**Why it matters:** An orphan always-loaded steering is invisible to the agent's navigation graph. It exists on disk but is never reached via references.
+
+**Note:** Steerings with `inclusion: fileMatch` or `manual` are excluded — they function independently of cross-references (loaded by their own inclusion mechanism).
 
 **Example:**
 ```
-.kiro/steering/flow-geral.md  →  0 incoming, 0 outgoing  →  ORPHAN
+.kiro/steering/flow-geral.md  →  inclusion: always, 0 incoming, 0 outgoing  →  ORPHAN
 ```
 
-**Impact:** The agent will never use the rules in that file. You wrote instructions that nobody reads.
+**Impact:** The agent will never navigate to that file via the knowledge graph.
 
 **How to fix:** Add a reference to this steering from a related steering using backtick syntax (`` `flow-geral.md` ``).
 
@@ -29,15 +31,17 @@ The goal is simple: **the more precise and well-connected the ecosystem, the mor
 
 ### 2. Fragile Links
 
-**What it checks:** Connections between steerings that rely on a single backtick reference. If someone deletes that reference, the connection dies.
+**What it checks:** Connections that rely on a single backtick reference, where the SOURCE is an always-loaded steering or hook. If someone deletes that reference, the navigation connection dies.
+
+**Note:** References from `fileMatch`/`manual` steerings are excluded — those are documentation references, not navigation. The target steering still loads by its own inclusion mechanism regardless.
 
 **Example:**
 ```
-code-conventions.md  →  (1 backtick-ref)  →  testing-guide.md
+code-conventions.md (always)  →  (1 backtick-ref)  →  testing-guide.md
 ```
-If someone removes the `` `testing-guide.md` `` from code-conventions, the connection disappears.
+If someone removes the `` `testing-guide.md` `` from code-conventions, the navigation link disappears.
 
-**Impact:** Fragile network. An accidental edit can isolate an entire steering.
+**Impact:** Fragile navigation network. An accidental edit can break the agent's ability to find related knowledge.
 
 **How to fix:** Add at least one more reference (wiki-link or markdown-link) between the connected files.
 
@@ -45,9 +49,11 @@ If someone removes the `` `testing-guide.md` `` from code-conventions, the conne
 
 ### 3. Isolated Files
 
-**What it checks:** Nodes in the graph with zero edges (no incoming or outgoing).
+**What it checks:** Steering nodes in the graph with zero edges (no incoming or outgoing).
 
-**Why it matters:** Files without connections are not part of the knowledge network. The agent has no context about them.
+**Note:** Hooks and skills are excluded — hooks are activated by IDE events and skills by keyword matching. They don't need graph connections to function.
+
+**Why it matters:** Steering files without connections are not part of the knowledge network.
 
 **Impact:** Lost information in the ecosystem.
 
@@ -84,34 +90,45 @@ Workspace "mobile"  →  0 steerings  →  GAP
 
 ### 6. Context Overload
 
-**What it checks:** Always-loaded steerings with more than 350 lines, and total always-loaded lines above 500.
+**What it checks:** Steerings with `inclusion: always` (no frontmatter defaults to always) that exceed 350 lines. Only `always` steerings count — `auto`, `fileMatch`, and `manual` are excluded from this metric.
 
-**Why it matters:** Each always-loaded steering consumes tokens from the agent's context window. Above 60% usage, quality degrades significantly.
+**Why it matters:** Each `always` steering consumes tokens from the agent's context window on EVERY interaction. Above 60% usage, quality degrades significantly.
+
+**Note:** Steerings with `inclusion: auto` are NOT counted here — they load on demand. See rule 19 (Large Domain Steerings) for auto steerings exceeding 1000 lines.
 
 **Example:**
 ```
-Total always-loaded: 1090 lines  →  OVERLOAD
-project-overview.md: 420 lines  →  OVERLOAD (max 350)
+Total always-loaded: 490 lines  →  OK (only counts inclusion: always)
+project-overview.md (always, 420 lines)  →  OVERLOAD (max 350)
+api-patterns.md (auto, 600 lines)  →  NOT counted (auto is on-demand)
 ```
 
 **Impact:** Agent loses reasoning capacity because it's "full" of context.
 
-**How to fix:** Split large steerings into smaller focused files, or change to `inclusion: manual` or `inclusion: fileMatch`.
+**How to fix:** Split large always-loaded steerings into smaller focused files, or change to `inclusion: auto` or `inclusion: fileMatch`.
 
 ---
 
 ### 7. Hooks Without Instruction
 
-**What it checks:** Hooks that fire but don't reference any steering — the agent executes without context.
+**What it checks:** Hooks that have no steering reference AND no self-sufficient prompt. A prompt is considered self-sufficient if it has >= 20 words and contains imperative verbs (analyze, verify, ensure, check, validate, etc.).
 
-**Example:**
+**Note:** Hooks with detailed, actionable prompts (>= 20 words + imperative content) are NOT flagged — they are self-contained and don't need a steering reference.
+
+**Example (flagged):**
 ```
-auto-learn.kiro.hook  →  fires on agentStop  →  but references no steering
+update-roadmap.kiro.hook  →  prompt: "update roadmap"  →  TOO SHORT (< 20 words)
 ```
 
-**Impact:** The hook triggers the agent, but it doesn't know WHAT to do because there's no associated instruction.
+**Example (NOT flagged):**
+```
+dml-protection.kiro.hook  →  prompt: "Analise o SQL, verifique se tem WHERE clause,
+avalie o impacto em produção, classifique o risco..."  →  SELF-SUFFICIENT (30+ words, imperative)
+```
 
-**How to fix:** Add a steering reference in the hook's prompt.
+**Impact:** Hooks with insufficient prompts fire without clear direction — the agent doesn't know what to do.
+
+**How to fix:** Either add a steering reference in the hook's prompt, or expand the prompt to be self-sufficient (>= 20 words with clear imperative instructions).
 
 ---
 
@@ -177,7 +194,11 @@ Both talk about: typescript, strict, semicolons, indentation, formatting
 
 ### 12. Passive Knowledge
 
-**What it checks:** Steerings with less than 10% of lines containing imperative verbs (use, always, never, must, should, avoid, etc.).
+**What it checks:** Steerings with less than 10% of lines containing actionable content. Actionable content includes:
+- Imperative verbs (use, always, never, must, should, avoid, ensure, implement, etc.)
+- Decision table data rows (tables with headers like "Condition/Action", "Quando/Ação", "If/Then", "Trigger/Response")
+
+**Note:** Decision tables with recognized column pairs count as instructions — each data row is an actionable line telling the agent what to do in a specific situation.
 
 **Example:**
 ```
@@ -187,9 +208,17 @@ project-overview.md  →  2% actionable
 No line tells the agent WHAT TO DO
 ```
 
-**Impact:** The agent reads the file but receives no direction. It's like reading a manual without instructions — just description.
+**Example (decision table counts as actionable):**
+```
+| Situação | Ação |
+|----------|------|
+| Pagamento falhou | Retry com backoff |    ← ACTIONABLE
+| Timeout > 30s | Cancelar e notificar |   ← ACTIONABLE
+```
 
-**How to fix:** Add imperative instructions: "Use TypeScript strict mode", "Always run tests before commit", "Never expose secrets in logs".
+**Impact:** The agent reads the file but receives no direction.
+
+**How to fix:** Add imperative instructions or decision tables with clear condition/action pairs.
 
 ---
 
@@ -346,6 +375,31 @@ PROBLEM 2: steering "when-to-refactor.md" has decision rules
 
 ---
 
+### 19. Large Domain Steerings (Modularization Opportunity)
+
+**What it checks:** Steerings with `inclusion: auto` that exceed 1000 lines. These are typically domain documentation files that load on demand.
+
+**Why it matters:** While `auto` steerings don't consume context permanently (they load on demand), a 1500-line file loaded into context at once still takes significant space. Breaking into smaller sub-steerings that reference each other allows the agent to load only the relevant section.
+
+**Example:**
+```
+crm-atendimento-domain.md (auto, 1582 lines)  →  LARGE DOMAIN
+```
+
+**Suggested architecture:**
+```
+crm-domain.md (auto, 200 lines)  →  index/overview, references sub-domains
+  ├─ crm-atendimento-domain.md (auto, 400 lines)
+  ├─ crm-vendas-domain.md (auto, 350 lines)
+  └─ crm-suporte-domain.md (auto, 300 lines)
+```
+
+**Impact:** When the agent needs CRM context, it loads the 200-line index first, then navigates to the specific sub-domain needed — instead of loading 1582 lines at once.
+
+**How to fix:** Split into a main steering (index) that references sub-steerings by topic. Each sub-steering has `inclusion: auto` and loads independently when its context is needed.
+
+---
+
 ## Visual Summary
 
 ```
@@ -365,7 +419,8 @@ PROBLEM 2: steering "when-to-refactor.md" has decision rules
 │  ├─ Hooks Without Instruction ├─ Hook Coverage Map              │
 │  ├─ Steerings Without Access  └─ Decision Path                  │
 │  ├─ Weak Instructions                                           │
-│  └─ Context Overload                                            │
+│  ├─ Context Overload          MODULARIZATION                    │
+│  └─ Large Domain Steerings    └─ Auto steerings > 1000 lines    │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -380,4 +435,4 @@ PROBLEM 2: steering "when-to-refactor.md" has decision rules
 
 ---
 
-*Version: 0.2.1 | 18 analysis rules | 137 automated tests*
+*Version: 0.2.2 | 19 analysis rules | 207 automated tests*

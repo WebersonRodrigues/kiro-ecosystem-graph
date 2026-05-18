@@ -12,16 +12,18 @@ O objetivo é simples: **quanto mais preciso e bem conectado o ecossistema, mais
 
 ### 1. Orphan Steerings (Steerings Órfãos)
 
-**O que verifica:** Steerings com zero conexões (nenhuma referência de entrada nem de saída).
+**O que verifica:** Steerings com `inclusion: always` (ou sem frontmatter) que possuem zero conexões (nenhuma referência de entrada nem de saída).
 
-**Por que importa:** Um steering órfão é invisível para o agente. Ele existe no disco mas nunca é alcançado — é conhecimento morto.
+**Por que importa:** Um steering órfão always-loaded é invisível para o grafo de navegação do agente. Ele existe no disco mas nunca é alcançado via referências.
+
+**Nota:** Steerings com `inclusion: fileMatch` ou `manual` são excluídos — eles funcionam independentemente de referências cruzadas (carregados pelo seu próprio mecanismo de inclusão).
 
 **Exemplo:**
 ```
-.kiro/steering/flow-geral.md  →  0 incoming, 0 outgoing  →  ÓRFÃO
+.kiro/steering/flow-geral.md  →  inclusion: always, 0 incoming, 0 outgoing  →  ÓRFÃO
 ```
 
-**Impacto:** O agente nunca vai usar as regras desse arquivo. Você escreveu instruções que ninguém lê.
+**Impacto:** O agente nunca vai navegar até esse arquivo via o grafo de conhecimento.
 
 **Como resolver:** Adicione uma referência a esse steering de outro steering relacionado usando backtick (`` `flow-geral.md` ``).
 
@@ -29,15 +31,17 @@ O objetivo é simples: **quanto mais preciso e bem conectado o ecossistema, mais
 
 ### 2. Fragile Links (Links Frágeis)
 
-**O que verifica:** Conexões entre steerings que dependem de uma única referência backtick. Se alguém apagar essa referência, a conexão morre.
+**O que verifica:** Conexões que dependem de uma única referência backtick, onde a ORIGEM é um steering always-loaded ou hook. Se alguém apagar essa referência, a conexão de navegação morre.
+
+**Nota:** Referências de steerings `fileMatch`/`manual` são excluídas — essas são referências de documentação, não de navegação. O steering alvo ainda carrega pelo seu próprio mecanismo de inclusão independentemente.
 
 **Exemplo:**
 ```
-code-conventions.md  →  (1 backtick-ref)  →  testing-guide.md
+code-conventions.md (always)  →  (1 backtick-ref)  →  testing-guide.md
 ```
-Se alguém remover o `` `testing-guide.md` `` do code-conventions, a conexão desaparece.
+Se alguém remover o `` `testing-guide.md` `` do code-conventions, o link de navegação desaparece.
 
-**Impacto:** Rede frágil. Uma edição acidental pode isolar um steering inteiro.
+**Impacto:** Rede de navegação frágil. Uma edição acidental pode quebrar a capacidade do agente de encontrar conhecimento relacionado.
 
 **Como resolver:** Adicione pelo menos mais uma referência (wiki-link ou markdown-link) entre os arquivos conectados.
 
@@ -45,9 +49,11 @@ Se alguém remover o `` `testing-guide.md` `` do code-conventions, a conexão de
 
 ### 3. Isolated Files (Arquivos Isolados)
 
-**O que verifica:** Nós no grafo com zero edges (nem entrada nem saída).
+**O que verifica:** Nós de steering no grafo com zero edges (nem entrada nem saída).
 
-**Por que importa:** Arquivos sem conexão não fazem parte da rede de conhecimento. O agente não tem contexto sobre eles.
+**Nota:** Hooks e skills são excluídos — hooks são ativados por eventos IDE e skills por correspondência de keywords. Eles não precisam de conexões no grafo para funcionar.
+
+**Por que importa:** Arquivos de steering sem conexões não fazem parte da rede de conhecimento.
 
 **Impacto:** Informação perdida no ecossistema.
 
@@ -84,34 +90,45 @@ Workspace "mobile"  →  0 steerings  →  GAP
 
 ### 6. Context Overload (Sobrecarga de Contexto)
 
-**O que verifica:** Steerings always-loaded com mais de 350 linhas, e total de linhas always-loaded acima de 500.
+**O que verifica:** Steerings com `inclusion: always` (sem frontmatter equivale a always) que excedem 350 linhas. Apenas steerings `always` contam — `auto`, `fileMatch` e `manual` são excluídos desta métrica.
 
-**Por que importa:** Cada steering always-loaded consome tokens da janela de contexto do agente. Acima de 60% de uso, a qualidade degrada significativamente.
+**Por que importa:** Cada steering `always` consome tokens da janela de contexto do agente em TODA interação. Acima de 60% de uso, a qualidade degrada significativamente.
+
+**Nota:** Steerings com `inclusion: auto` NÃO são contados aqui — eles carregam sob demanda. Veja regra 19 (Large Domain Steerings) para steerings auto que excedem 1000 linhas.
 
 **Exemplo:**
 ```
-Total always-loaded: 1090 linhas  →  OVERLOAD
-project-overview.md: 420 linhas  →  OVERLOAD (max 350)
+Total always-loaded: 490 linhas  →  OK (conta apenas inclusion: always)
+project-overview.md (always, 420 linhas)  →  OVERLOAD (max 350)
+api-patterns.md (auto, 600 linhas)  →  NÃO contado (auto é sob demanda)
 ```
 
 **Impacto:** Agente perde capacidade de raciocínio porque está "cheio" de contexto.
 
-**Como resolver:** Divida steerings grandes em arquivos menores focados, ou mude para `inclusion: manual` ou `inclusion: fileMatch`.
+**Como resolver:** Divida steerings always-loaded grandes em arquivos menores focados, ou mude para `inclusion: auto` ou `inclusion: fileMatch`.
 
 ---
 
 ### 7. Hooks Without Instruction (Hooks sem Instrução)
 
-**O que verifica:** Hooks que disparam mas não referenciam nenhum steering — o agente executa sem contexto.
+**O que verifica:** Hooks que não referenciam nenhum steering E não possuem um prompt auto-suficiente. Um prompt é considerado auto-suficiente se tem >= 20 palavras e contém verbos imperativos (analise, verifique, garanta, cheque, valide, use, etc.).
 
-**Exemplo:**
+**Nota:** Hooks com prompts detalhados e acionáveis (>= 20 palavras + conteúdo imperativo) NÃO são sinalizados — eles são auto-contidos e não precisam de referência a steering.
+
+**Exemplo (sinalizado):**
 ```
-auto-learn.kiro.hook  →  dispara em agentStop  →  mas não referencia nenhum steering
+update-roadmap.kiro.hook  →  prompt: "update roadmap"  →  MUITO CURTO (< 20 palavras)
 ```
 
-**Impacto:** O hook aciona o agente, mas ele não sabe O QUE fazer porque não tem instrução associada.
+**Exemplo (NÃO sinalizado):**
+```
+dml-protection.kiro.hook  →  prompt: "Analise o SQL, verifique se tem WHERE clause,
+avalie o impacto em produção, classifique o risco..."  →  AUTO-SUFICIENTE (30+ palavras, imperativo)
+```
 
-**Como resolver:** Adicione uma referência a um steering no prompt do hook.
+**Impacto:** Hooks com prompts insuficientes disparam sem direção clara — o agente não sabe o que fazer.
+
+**Como resolver:** Adicione uma referência a um steering no prompt do hook, ou expanda o prompt para ser auto-suficiente (>= 20 palavras com instruções imperativas claras).
 
 ---
 
@@ -177,7 +194,11 @@ Ambos falam de: typescript, strict, semicolons, indentation, formatting
 
 ### 12. Passive Knowledge (Conhecimento Passivo)
 
-**O que verifica:** Steerings com menos de 10% de linhas contendo verbos imperativos (use, always, never, must, should, avoid, etc.).
+**O que verifica:** Steerings com menos de 10% de linhas contendo conteúdo acionável. Conteúdo acionável inclui:
+- Verbos imperativos (use, always, never, must, should, avoid, ensure, implement, etc.)
+- Linhas de dados em tabelas de decisão (tabelas com cabeçalhos como "Condition/Action", "Quando/Ação", "If/Then", "Trigger/Response")
+
+**Nota:** Tabelas de decisão com pares de colunas reconhecidos contam como instruções — cada linha de dados é uma linha acionável dizendo ao agente o que fazer em uma situação específica.
 
 **Exemplo:**
 ```
@@ -187,9 +208,17 @@ project-overview.md  →  2% actionable
 Nenhuma linha diz ao agente O QUE FAZER
 ```
 
+**Exemplo (tabela de decisão conta como acionável):**
+```
+| Situação | Ação |
+|----------|------|
+| Pagamento falhou | Retry com backoff |    ← ACIONÁVEL
+| Timeout > 30s | Cancelar e notificar |   ← ACIONÁVEL
+```
+
 **Impacto:** O agente lê o arquivo mas não recebe direção. É como ler um manual sem instruções — só descrição.
 
-**Como resolver:** Adicione instruções imperativas: "Use TypeScript strict mode", "Always run tests before commit", "Never expose secrets in logs".
+**Como resolver:** Adicione instruções imperativas ou tabelas de decisão com pares claros de condição/ação.
 
 ---
 
@@ -346,6 +375,31 @@ PROBLEMA 2: steering "when-to-refactor.md" tem regras de decisão
 
 ---
 
+### 19. Large Domain Steerings (Steerings de Domínio Extenso)
+
+**O que verifica:** Steerings com `inclusion: auto` que excedem 1000 linhas. São tipicamente arquivos de documentação de domínio que carregam sob demanda.
+
+**Por que importa:** Embora steerings `auto` não consumam contexto permanentemente (carregam sob demanda), um arquivo de 1500 linhas carregado no contexto de uma vez ainda ocupa espaço significativo. Dividir em sub-steerings menores que se referenciam permite ao agente carregar apenas a seção relevante.
+
+**Exemplo:**
+```
+crm-atendimento-domain.md (auto, 1582 linhas)  →  LARGE DOMAIN
+```
+
+**Arquitetura sugerida:**
+```
+crm-domain.md (auto, 200 linhas)  →  índice/overview, referencia sub-domínios
+  ├─ crm-atendimento-domain.md (auto, 400 linhas)
+  ├─ crm-vendas-domain.md (auto, 350 linhas)
+  └─ crm-suporte-domain.md (auto, 300 linhas)
+```
+
+**Impacto:** Quando o agente precisa de contexto CRM, ele carrega o índice de 200 linhas primeiro, depois navega para o sub-domínio específico necessário — ao invés de carregar 1582 linhas de uma vez.
+
+**Como resolver:** Divida em um steering principal (índice) que referencia sub-steerings por tópico. Cada sub-steering tem `inclusion: auto` e carrega independentemente quando seu contexto é necessário.
+
+---
+
 ## Resumo Visual
 
 ```
@@ -353,19 +407,20 @@ PROBLEMA 2: steering "when-to-refactor.md" tem regras de decisão
 │                    ANÁLISE COGNITIVA                             │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  ESTRUTURA DO GRAFO          QUALIDADE DO CONTEÚDO              │
-│  ├─ Orphan Steerings         ├─ Passive Knowledge               │
-│  ├─ Fragile Links            ├─ Signal-to-Noise                 │
-│  ├─ Isolated Files           ├─ Duplicate Intent                │
-│  ├─ Coverage Gaps            └─ Contradictions                  │
+│  ESTRUTURA DO GRAFO           QUALIDADE DO CONTEÚDO             │
+│  ├─ Orphan Steerings          ├─ Passive Knowledge              │
+│  ├─ Fragile Links             ├─ Signal-to-Noise                │
+│  ├─ Isolated Files            ├─ Duplicate Intent               │
+│  ├─ Coverage Gaps             └─ Contradictions                 │
 │  ├─ Dead Loops                                                  │
-│  └─ Hops to Reach           SEGURANÇA E MATURIDADE             │
-│                              ├─ Quality Gate (0/1/2)            │
-│  COMPLETUDE                  ├─ DML Protection (0/1/2)          │
-│  ├─ Hooks Without Instruction├─ Hook Coverage Map               │
-│  ├─ Steerings Without Access └─ Decision Path                   │
+│  └─ Hops to Reach            SEGURANÇA E MATURIDADE            │
+│                               ├─ Quality Gate (0/1/2)           │
+│  COMPLETUDE                   ├─ DML Protection (0/1/2)         │
+│  ├─ Hooks Without Instruction ├─ Hook Coverage Map              │
+│  ├─ Steerings Without Access  └─ Decision Path                  │
 │  ├─ Weak Instructions                                           │
-│  └─ Context Overload                                            │
+│  ├─ Context Overload          MODULARIZAÇÃO                     │
+│  └─ Large Domain Steerings    └─ Auto steerings > 1000 linhas   │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -380,4 +435,4 @@ PROBLEMA 2: steering "when-to-refactor.md" tem regras de decisão
 
 ---
 
-*Versão: 0.2.1 | 18 regras de análise | 137 testes automatizados*
+*Versão: 0.2.2 | 19 regras de análise | 207 testes automatizados*
