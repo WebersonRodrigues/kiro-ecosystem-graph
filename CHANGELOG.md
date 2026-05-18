@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.3.0 (2026-05-18)
+
+### Features
+
+- **Health Score Unificado (0-100)** — Score consolidado computado a partir de 4 sub-scores ponderados (connectivity 30%, content quality 25%, completeness 25%, maturity 20%). Exibido no header do painel cognitivo com color band (verde/amarelo/vermelho) e indicador de tendência (↑/↓/→).
+- **Stale Content Detection (Rule 20)** — Detecta steerings não modificados há 90+ dias com alta conectividade (3+ conexões). Risk score = staleness_days × degree. Ordenado por criticidade.
+- **Link Recommender** — Sugere conexões entre steerings com 30-59% de keyword overlap que não se referenciam. Top 10 sugestões ordenadas por similaridade.
+- **Semantic Coherence (Rule 21)** — Detecta steerings cujos section headers não correspondem ao domínio esperado pelo NodeType. Alerta quando coerência < 70%.
+- **Circular Hook Dependencies (Rule 22)** — Detecta ciclos entre hooks e steerings que podem causar loops infinitos no agente. Usa DFS com coloração.
+- **Minimap Navigation** — Canvas 150×100px no canto inferior direito com bird's-eye view do grafo. Click-to-navigate e drag-to-pan. Auto-hide com < 15 nós.
+- **Onboarding Wizard** — Seção "Ecosystem Maturity" no painel cognitivo detectando fase atual (1-5) com barra de progresso e sugestão de próximo passo.
+- **Mermaid Export** — Exporta o grafo como flowchart Mermaid (clipboard ou arquivo .mmd). Nodes com shapes por tipo, classDefs com cores, truncation pra grafos grandes.
+- **LRU Content Analysis Cache** — Cache MD5-based com eviction LRU (max 500 entries) pra evitar re-computação de métricas textuais em file changes.
+- **Fix Prompt Generator** — Backend pra geração de prompts direcionados por issue (19 categorias). Usado pelo relatório exportado.
+
+### Improvements
+
+- **Relatório Markdown expandido** — Agora inclui seções pra todas as 22 regras + Health Score + Suggested Connections + instruções pro AI cobrindo todos os problemas.
+- **457 testes automatizados** — De 137 pra 457 (+320 testes novos cobrindo todas as features).
+- **Documentação atualizada** — `docs/cognitive-analysis-rules.md` e `docs/regras-analise-cognitiva.md` atualizados com Rules 20-22.
+
+### Removed
+
+- **Botões Fix/Fix All do painel** — Removidos por UX inadequada em painel de 210px. O Export continua gerando instruções completas pro AI.
+- **Botão Create from Template** — Removido do painel (sugestão é informacional, não ação).
+
+---
+
 ## 0.2.2 (2026-05-18)
 
 ### Bug Fixes
