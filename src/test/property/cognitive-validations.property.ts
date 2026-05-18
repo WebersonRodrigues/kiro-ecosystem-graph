@@ -971,3 +971,289 @@ describe('Preservation — Parser extracts inclusion without quotes correctly (P
     assert.strictEqual(result.overloaded.length, 0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Analysis Precision Refinements — Decision Table Detection
+// ─────────────────────────────────────────────────────────────────────────────
+
+import {
+  isDecisionTableHeader,
+  computeActionableRatio,
+} from '../../services/contentAnalyzer';
+import { computeFragileLinks } from '../../services/cognitiveValidations';
+
+describe('Decision Table — Header Detection (Property)', function () {
+  this.timeout(30000);
+
+  /**
+   * **Feature: analysis-precision-refinements, Property 1: Detecção de cabeçalho de tabela de decisão**
+   * **Validates: Requirements 1.1**
+   *
+   * For any table line containing a recognized decision pair,
+   * isDecisionTableHeader must return true.
+   */
+  it('lines with recognized decision pairs return true', function () {
+    const pairArb = fc.constantFrom(
+      ['Quando', 'Ação'], ['Quando', 'Acao'],
+      ['Se', 'Então'], ['Se', 'Entao'],
+      ['Situação', 'Ação'], ['Situacao', 'Acao'],
+      ['Cenário', 'Resposta'], ['Cenario', 'Resposta'],
+      ['Condition', 'Action'],
+      ['If', 'Then'],
+      ['Trigger', 'Response'],
+    );
+
+    const extraColArb = fc.array(
+      fc.stringOf(fc.constantFrom('a', 'b', 'c', 'd', 'e'), { minLength: 3, maxLength: 8 }),
+      { minLength: 0, maxLength: 3 },
+    );
+
+    fc.assert(
+      fc.property(pairArb, extraColArb, ([colA, colB], extras) => {
+        const allCols = [colA, colB, ...extras];
+        const line = '| ' + allCols.join(' | ') + ' |';
+        assert.strictEqual(isDecisionTableHeader(line), true,
+          `Expected true for: ${line}`);
+      }),
+      { numRuns: 100 },
+    );
+  });
+
+  it('lines without recognized pairs return false', function () {
+    const nonDecisionColArb = fc.constantFrom(
+      'Name', 'Description', 'File', 'Size', 'Date', 'Author',
+      'Status', 'Priority', 'Module', 'Version', 'Notes',
+    );
+
+    const colsArb = fc.array(nonDecisionColArb, { minLength: 2, maxLength: 5 });
+
+    fc.assert(
+      fc.property(colsArb, (cols) => {
+        const line = '| ' + cols.join(' | ') + ' |';
+        assert.strictEqual(isDecisionTableHeader(line), false,
+          `Expected false for: ${line}`);
+      }),
+      { numRuns: 100 },
+    );
+  });
+});
+
+describe('Decision Table — Data Rows Actionable (Property)', function () {
+  this.timeout(30000);
+
+  /**
+   * **Feature: analysis-precision-refinements, Property 2: Linhas de dados de tabela de decisão são acionáveis**
+   * **Validates: Requirements 1.2, 1.3, 1.6**
+   *
+   * For any decision table with N data rows, computeActionableRatio
+   * counts exactly N lines as actionable from the table.
+   */
+  it('N data rows produce exactly N actionable lines from table', function () {
+    const dataRowCountArb = fc.integer({ min: 1, max: 10 });
+
+    fc.assert(
+      fc.property(dataRowCountArb, (n) => {
+        const lines = ['| Condition | Action |', '|---|---|'];
+        for (let i = 0; i < n; i++) {
+          lines.push(`| condition-${i} | action-${i} |`);
+        }
+        const content = lines.join('\n');
+        const ratio = computeActionableRatio(content);
+        const totalNonEmpty = n + 2; // header + separator + n data rows
+        const expected = n / totalNonEmpty;
+        assert.strictEqual(ratio, expected,
+          `Expected ${n}/${totalNonEmpty} for ${n} data rows`);
+      }),
+      { numRuns: 100 },
+    );
+  });
+
+  it('table with 0 data rows contributes 0 actionable', function () {
+    const content = ['| If | Then |', '|---|---|'].join('\n');
+    const ratio = computeActionableRatio(content);
+    assert.strictEqual(ratio, 0);
+  });
+});
+
+describe('Decision Table — Additivity (Property)', function () {
+  this.timeout(30000);
+
+  /**
+   * **Feature: analysis-precision-refinements, Property 3: Aditividade de imperativos e tabelas de decisão**
+   * **Validates: Requirements 1.5**
+   *
+   * For content with K imperative lines and a decision table with N data rows,
+   * total actionable = K + N.
+   */
+  it('K imperatives + N data rows = K+N actionable', function () {
+    const kArb = fc.integer({ min: 1, max: 5 });
+    const nArb = fc.integer({ min: 1, max: 5 });
+
+    fc.assert(
+      fc.property(kArb, nArb, (k, n) => {
+        const lines: string[] = [];
+        for (let i = 0; i < k; i++) {
+          lines.push(`Always validate input-${i}.`);
+        }
+        lines.push('| Trigger | Response |');
+        lines.push('|---|---|');
+        for (let i = 0; i < n; i++) {
+          lines.push(`| trigger-${i} | response-${i} |`);
+        }
+        const content = lines.join('\n');
+        const ratio = computeActionableRatio(content);
+        const totalNonEmpty = k + 2 + n; // k imperatives + header + sep + n data
+        const expectedActionable = k + n;
+        const expected = expectedActionable / totalNonEmpty;
+        assert.strictEqual(ratio, expected,
+          `Expected ${expectedActionable}/${totalNonEmpty}`);
+      }),
+      { numRuns: 100 },
+    );
+  });
+});
+
+describe('Decision Table — Non-Decision Tables (Property)', function () {
+  this.timeout(30000);
+
+  /**
+   * **Feature: analysis-precision-refinements, Property 4: Tabelas não-decisão não inflam o actionable count**
+   * **Validates: Requirements 1.4, 3.1, 3.3, 3.4**
+   *
+   * Adding a non-decision table does not change the actionable count.
+   */
+  it('non-decision table rows do not inflate actionable count', function () {
+    const kArb = fc.integer({ min: 1, max: 5 });
+    const tableRowsArb = fc.integer({ min: 1, max: 5 });
+
+    fc.assert(
+      fc.property(kArb, tableRowsArb, (k, tableRows) => {
+        // Base content with k imperative lines
+        const baseLines: string[] = [];
+        for (let i = 0; i < k; i++) {
+          baseLines.push(`Never skip validation-${i}.`);
+        }
+        const baseContent = baseLines.join('\n');
+        const baseRatio = computeActionableRatio(baseContent);
+        const baseActionable = Math.round(baseRatio * k);
+
+        // Add non-decision table
+        const withTable = [...baseLines];
+        withTable.push('| Name | Description |');
+        withTable.push('|---|---|');
+        for (let i = 0; i < tableRows; i++) {
+          withTable.push(`| item-${i} | desc-${i} |`);
+        }
+        const tableContent = withTable.join('\n');
+        const tableRatio = computeActionableRatio(tableContent);
+        const totalNonEmpty = k + 2 + tableRows;
+        const tableActionable = Math.round(tableRatio * totalNonEmpty);
+
+        // Actionable count should remain the same (only k imperatives)
+        assert.strictEqual(tableActionable, baseActionable,
+          `Actionable count should stay at ${baseActionable}, got ${tableActionable}`);
+      }),
+      { numRuns: 100 },
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Analysis Precision Refinements — Fragile Links Filter
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Fragile Links Filter (Property)', function () {
+  this.timeout(30000);
+
+  /**
+   * **Feature: analysis-precision-refinements, Property 5: Vínculos frágeis apenas de origens always/auto/hook**
+   * **Validates: Requirements 2.1, 2.2, 2.4, 2.5, 3.2**
+   *
+   * computeFragileLinks only includes edges where source is always/auto or hook.
+   * Edges from fileMatch/manual sources never appear.
+   */
+  it('only always/auto/hook sources appear in fragile links', function () {
+    const inclusionArb = fc.constantFrom('always', 'auto', 'fileMatch', 'manual');
+    const typeArb = fc.constantFrom(
+      'steering-domain' as const,
+      'steering-flow' as const,
+      'hook-auto' as const,
+      'hook-manual' as const,
+    );
+
+    const nodeCountArb = fc.integer({ min: 2, max: 8 });
+
+    fc.assert(
+      fc.property(nodeCountArb, fc.array(
+        fc.tuple(inclusionArb, typeArb),
+        { minLength: 2, maxLength: 8 },
+      ), (_, nodeConfigs) => {
+        const nodes: GraphNode[] = nodeConfigs.map(([inclusion, type], i) =>
+          makeNode(`node-${i}.md`, { type, metadata: { inclusion } }),
+        );
+        nodes.push(makeNode('target.md'));
+
+        const edges: GraphEdge[] = nodeConfigs.map((_, i) => ({
+          source: `node-${i}.md`,
+          target: 'target.md',
+          type: 'backtick-ref' as const,
+        }));
+
+        const result = computeFragileLinks(nodes, edges);
+
+        for (const link of result) {
+          const sourceNode = nodes.find((n) => n.id === link.source);
+          assert.ok(sourceNode, `Source node ${link.source} should exist`);
+          const sType = sourceNode!.type || '';
+          const isHook = sType === 'hook-auto' || sType === 'hook-manual';
+          if (!isHook) {
+            const inclusion = (sourceNode!.metadata && sourceNode!.metadata.inclusion) || 'always';
+            assert.ok(
+              inclusion === 'always' || inclusion === 'auto',
+              `Non-hook source should have always/auto inclusion, got ${inclusion}`,
+            );
+          }
+        }
+
+        // Verify fileMatch/manual sources are excluded
+        for (const edge of edges) {
+          const sourceNode = nodes.find((n) => n.id === edge.source);
+          if (!sourceNode) { continue; }
+          const sType = sourceNode.type || '';
+          const isHook = sType === 'hook-auto' || sType === 'hook-manual';
+          if (!isHook) {
+            const inclusion = (sourceNode.metadata && sourceNode.metadata.inclusion) || 'always';
+            if (inclusion === 'fileMatch' || inclusion === 'manual') {
+              assert.ok(
+                !result.some((r) => r.source === edge.source),
+                `fileMatch/manual source ${edge.source} should NOT be in result`,
+              );
+            }
+          }
+        }
+      }),
+      { numRuns: 100 },
+    );
+  });
+
+  it('hooks always appear regardless of inclusion metadata', function () {
+    const inclusionArb = fc.constantFrom('always', 'auto', 'fileMatch', 'manual');
+    const hookTypeArb = fc.constantFrom('hook-auto' as const, 'hook-manual' as const);
+
+    fc.assert(
+      fc.property(inclusionArb, hookTypeArb, (inclusion, hookType) => {
+        const nodes: GraphNode[] = [
+          makeNode('hook.json', { type: hookType, metadata: { inclusion } }),
+          makeNode('target.md'),
+        ];
+        const edges: GraphEdge[] = [
+          { source: 'hook.json', target: 'target.md', type: 'backtick-ref' },
+        ];
+        const result = computeFragileLinks(nodes, edges);
+        assert.strictEqual(result.length, 1,
+          `Hook with type=${hookType} and inclusion=${inclusion} should be included`);
+      }),
+      { numRuns: 50 },
+    );
+  });
+});

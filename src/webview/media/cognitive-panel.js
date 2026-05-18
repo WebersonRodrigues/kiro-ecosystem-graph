@@ -880,6 +880,7 @@ var CognitivePanel = (function () {
     });
 
     // 2. Vinculos Frageis: edges with weight=1 AND type='backtick-ref'
+    //    ONLY from always/auto steerings or hooks
     var vinculosFrageis = [];
     data.links.forEach(function(link) {
       var w = link.weight || 1;
@@ -887,6 +888,17 @@ var CognitivePanel = (function () {
         var s = typeof link.source === 'object' ? link.source.id : link.source;
         var t = typeof link.target === 'object' ? link.target.id : link.target;
         var sNode = data.nodes.find(function(n) { return n.id === s; });
+
+        // Filter: only flag if source is always/auto steering or hook
+        if (sNode) {
+          var sType = sNode.type || '';
+          var isHook = (sType === 'hook-auto' || sType === 'hook-manual');
+          if (!isHook) {
+            var sInclusion = (sNode.metadata && sNode.metadata.inclusion) || 'always';
+            if (sInclusion === 'fileMatch' || sInclusion === 'manual') { return; }
+          }
+        }
+
         var tNode = data.nodes.find(function(n) { return n.id === t; });
         vinculosFrageis.push({
           source: s,

@@ -5,6 +5,8 @@ import {
   extractImperativeLines,
   extractSectionHeaders,
   analyzeContent,
+  isDecisionTableHeader,
+  isTableSeparator,
 } from '../../services/contentAnalyzer';
 
 describe('ContentAnalyzer', function () {
@@ -272,6 +274,161 @@ describe('ContentAnalyzer', function () {
       assert.ok(metrics.actionableRatio > 0);
       assert.ok(Array.isArray(metrics.imperativeLines));
       assert.ok(metrics.imperativeLines.length >= 2);
+    });
+  });
+
+  describe('isDecisionTableHeader()', function () {
+    it('detects PT-BR pair: Quando/Ação', function () {
+      assert.strictEqual(isDecisionTableHeader('| Quando | Ação |'), true);
+    });
+
+    it('detects PT-BR pair: Quando/Acao (no accent)', function () {
+      assert.strictEqual(isDecisionTableHeader('| Quando | Acao |'), true);
+    });
+
+    it('detects PT-BR pair: Se/Então', function () {
+      assert.strictEqual(isDecisionTableHeader('| Se | Então |'), true);
+    });
+
+    it('detects PT-BR pair: Se/Entao (no accent)', function () {
+      assert.strictEqual(isDecisionTableHeader('| Se | Entao |'), true);
+    });
+
+    it('detects PT-BR pair: Situação/Ação', function () {
+      assert.strictEqual(isDecisionTableHeader('| Situação | Ação |'), true);
+    });
+
+    it('detects PT-BR pair: Cenário/Resposta', function () {
+      assert.strictEqual(isDecisionTableHeader('| Cenário | Resposta |'), true);
+    });
+
+    it('detects EN pair: Condition/Action', function () {
+      assert.strictEqual(isDecisionTableHeader('| Condition | Action |'), true);
+    });
+
+    it('detects EN pair: If/Then', function () {
+      assert.strictEqual(isDecisionTableHeader('| If | Then |'), true);
+    });
+
+    it('detects EN pair: Trigger/Response', function () {
+      assert.strictEqual(isDecisionTableHeader('| Trigger | Response |'), true);
+    });
+
+    it('is case-insensitive', function () {
+      assert.strictEqual(isDecisionTableHeader('| CONDITION | ACTION |'), true);
+      assert.strictEqual(isDecisionTableHeader('| condition | action |'), true);
+    });
+
+    it('returns false for regular table headers', function () {
+      assert.strictEqual(isDecisionTableHeader('| Name | Description |'), false);
+      assert.strictEqual(isDecisionTableHeader('| File | Size | Date |'), false);
+    });
+
+    it('returns false for lines not starting with |', function () {
+      assert.strictEqual(isDecisionTableHeader('Condition | Action'), false);
+    });
+
+    it('returns false for empty string', function () {
+      assert.strictEqual(isDecisionTableHeader(''), false);
+    });
+  });
+
+  describe('isTableSeparator()', function () {
+    it('detects standard separator', function () {
+      assert.strictEqual(isTableSeparator('|---|---|'), true);
+    });
+
+    it('detects separator with colons (alignment)', function () {
+      assert.strictEqual(isTableSeparator('|:---|---:|'), true);
+    });
+
+    it('detects separator with spaces', function () {
+      assert.strictEqual(isTableSeparator('| --- | --- |'), true);
+    });
+
+    it('returns false for data rows', function () {
+      assert.strictEqual(isTableSeparator('| value1 | value2 |'), false);
+    });
+
+    it('returns false for non-table lines', function () {
+      assert.strictEqual(isTableSeparator('some text'), false);
+    });
+  });
+
+  describe('computeActionableRatio() with decision tables', function () {
+    it('counts decision table data rows as actionable', function () {
+      const content = [
+        '| Condition | Action |',
+        '|---|---|',
+        '| User logs in | Show dashboard |',
+        '| User logs out | Redirect to login |',
+        '| Session expires | Show timeout message |',
+      ].join('\n');
+      const ratio = computeActionableRatio(content);
+      // 3 data rows actionable out of 5 non-empty lines (header + sep + 3 data)
+      // But header is not counted as actionable, separator is not counted
+      // nonEmpty = 5 lines, actionable = 3
+      assert.strictEqual(ratio, 3 / 5);
+    });
+
+    it('counts mixed imperative + decision table rows', function () {
+      const content = [
+        'Always validate input.',
+        'Never skip tests.',
+        '| If | Then |',
+        '|---|---|',
+        '| error occurs | retry operation |',
+        '| timeout | show message |',
+      ].join('\n');
+      const ratio = computeActionableRatio(content);
+      // 2 imperative + 2 data rows = 4 actionable out of 6 non-empty lines
+      assert.strictEqual(ratio, 4 / 6);
+    });
+
+    it('does not count header or separator as actionable', function () {
+      const content = [
+        '| Trigger | Response |',
+        '|---|---|',
+        '| click | navigate |',
+      ].join('\n');
+      const ratio = computeActionableRatio(content);
+      // 1 data row actionable out of 3 non-empty lines
+      assert.strictEqual(ratio, 1 / 3);
+    });
+
+    it('table with only header + separator contributes 0 actionable', function () {
+      const content = [
+        '| Condition | Action |',
+        '|---|---|',
+      ].join('\n');
+      const ratio = computeActionableRatio(content);
+      // 0 actionable out of 2 non-empty lines
+      assert.strictEqual(ratio, 0);
+    });
+
+    it('non-decision table does not count rows as actionable', function () {
+      const content = [
+        '| Name | Description |',
+        '|---|---|',
+        '| foo | a thing |',
+        '| bar | another thing |',
+      ].join('\n');
+      const ratio = computeActionableRatio(content);
+      // No decision pair → no actionable lines
+      assert.strictEqual(ratio, 0);
+    });
+
+    it('exits decision table mode on non-pipe line', function () {
+      const content = [
+        '| If | Then |',
+        '|---|---|',
+        '| error | retry |',
+        'This is descriptive text.',
+        'Always log errors.',
+      ].join('\n');
+      const ratio = computeActionableRatio(content);
+      // 1 data row + 1 imperative = 2 actionable out of 5 non-empty lines
+      assert.strictEqual(ratio, 2 / 5);
     });
   });
 });

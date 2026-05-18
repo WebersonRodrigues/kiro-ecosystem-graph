@@ -60,6 +60,44 @@ const STOP_WORDS = new Set([
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Decision Table Detection
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Recognized decision column pairs (PT-BR + EN) */
+const DECISION_TABLE_PAIRS: [string, string][] = [
+  ['quando', 'ação'], ['quando', 'acao'],
+  ['se', 'então'], ['se', 'entao'],
+  ['situação', 'ação'], ['situacao', 'acao'],
+  ['cenário', 'resposta'], ['cenario', 'resposta'],
+  ['condition', 'action'],
+  ['if', 'then'],
+  ['trigger', 'response'],
+];
+
+/**
+ * Checks if a table header line contains a recognized decision column pair.
+ * The line must start with '|' and contain at least one recognized pair.
+ */
+export function isDecisionTableHeader(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('|')) { return false; }
+  const columns = trimmed
+    .split('|')
+    .map((col) => col.trim().toLowerCase())
+    .filter((col) => col.length > 0);
+  return DECISION_TABLE_PAIRS.some(
+    ([a, b]) => columns.includes(a) && columns.includes(b),
+  );
+}
+
+/**
+ * Checks if a line is a markdown table separator (e.g. |---|---|).
+ */
+export function isTableSeparator(line: string): boolean {
+  return /^\|[\s\-:|]+\|$/.test(line.trim());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Imperative Patterns
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -94,14 +132,41 @@ export function extractKeywords(content: string): string[] {
 /**
  * Computes the proportion of actionable lines in content.
  * Excludes empty lines, front-matter, and separators.
+ * Counts both imperative verb lines and decision table data rows.
  */
 export function computeActionableRatio(content: string): number {
   const lines = content.split('\n');
   const nonEmpty = lines.filter((l) => !isExcludedLine(l));
   if (nonEmpty.length === 0) { return 0; }
 
-  const actionable = nonEmpty.filter((l) => isActionableLine(l));
-  return actionable.length / nonEmpty.length;
+  let actionableCount = 0;
+  let inDecisionTable = false;
+
+  for (const line of lines) {
+    if (isExcludedLine(line)) { continue; }
+
+    if (isDecisionTableHeader(line)) {
+      inDecisionTable = true;
+      continue;
+    }
+
+    if (inDecisionTable) {
+      if (!line.trim().startsWith('|')) {
+        inDecisionTable = false;
+      } else if (isTableSeparator(line)) {
+        continue;
+      } else {
+        actionableCount++;
+        continue;
+      }
+    }
+
+    if (isActionableLine(line)) {
+      actionableCount++;
+    }
+  }
+
+  return actionableCount / nonEmpty.length;
 }
 
 /**

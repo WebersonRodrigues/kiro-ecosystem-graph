@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.2 (2026-05-18)
+
+### Bug Fixes
+
+- **False Positive Elimination** — 4 bugs corrigidos na análise cognitiva:
+  - Context Overload agora exclui steerings `fileMatch`/`manual` da contagem (antes inflava ~10x)
+  - Orphan Steerings agora exclui steerings `fileMatch`/`manual` (não precisam de cross-references)
+  - Isolated Files agora exclui hooks e skills (ativados por evento/keyword, não por grafo)
+  - Hooks Without Instruction agora avalia qualidade do prompt (>= 20 palavras + verbos imperativos) ao invés de métrica binária
+- **Parser Quote Stripping** — `inclusion: "fileMatch"` (com aspas) agora é extraído corretamente como `fileMatch`
+- **Hook Prompt Metadata** — `then.prompt` do hook agora é armazenado em `metadata.hookPrompt` para avaliação de suficiência
+
+### Improvements
+
+- **Decision Table Detection** — Tabelas de decisão (Quando/Ação, Condition/Action, If/Then, etc.) agora contam como conteúdo acionável no `actionableRatio`
+- **Fragile Links Precision** — Só flagra referências de steerings always/auto ou hooks. Referências de steerings fileMatch/manual (documentação) são ignoradas
+- **205 testes automatizados** — suite completa cobrindo todos os serviços e validações
+- **Hooks padronizados** — todos os hooks agora usam extensão `.kiro.hook` (padrão Kiro IDE)
+
 ## 0.2.1 (2026-05-15)
 
 ### Bug Fixes

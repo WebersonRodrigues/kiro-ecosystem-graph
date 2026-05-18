@@ -681,3 +681,49 @@ export function computeHooksWithoutInstruction(
 
   return result;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fragile Links
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Computes fragile links: backtick-ref edges with weight=1 where the source
+ * is an always/auto steering or a hook. Excludes fileMatch/manual sources.
+ *
+ * @param nodes - All graph nodes
+ * @param edges - All graph edges
+ * @returns Array of fragile link descriptors
+ */
+export function computeFragileLinks(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+): Array<{ source: string; target: string; sourceLabel: string; targetLabel: string }> {
+  const nodeMap = new Map<string, GraphNode>();
+  for (const n of nodes) { nodeMap.set(n.id, n); }
+
+  const result: Array<{ source: string; target: string; sourceLabel: string; targetLabel: string }> = [];
+
+  for (const edge of edges) {
+    if (edge.type !== 'backtick-ref') { continue; }
+
+    const sourceNode = nodeMap.get(edge.source);
+    if (sourceNode) {
+      const sType = sourceNode.type || '';
+      const isHook = sType === 'hook-auto' || sType === 'hook-manual';
+      if (!isHook) {
+        const inclusion = (sourceNode.metadata && sourceNode.metadata.inclusion) || 'always';
+        if (inclusion === 'fileMatch' || inclusion === 'manual') { continue; }
+      }
+    }
+
+    const targetNode = nodeMap.get(edge.target);
+    result.push({
+      source: edge.source,
+      target: edge.target,
+      sourceLabel: sourceNode ? sourceNode.label : edge.source,
+      targetLabel: targetNode ? targetNode.label : edge.target,
+    });
+  }
+
+  return result;
+}
