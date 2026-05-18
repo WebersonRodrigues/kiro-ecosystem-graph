@@ -1248,7 +1248,7 @@ function handleUpdateGraph(data) {
         workspaceFolders.push(n.workspaceFolder);
       }
     });
-    updateCognitivePanel(graphData, degreeMap, workspaceFolders);
+    updateCognitivePanel(graphData, degreeMap, workspaceFolders, statsHistory);
   }
 
   // Update shape legend (if shape-legend.js is loaded)
@@ -1393,7 +1393,7 @@ function reapplyFilters() {
         workspaceFolders.push(n.workspaceFolder);
       }
     });
-    updateCognitivePanel(filteredData, degreeMap, workspaceFolders);
+    updateCognitivePanel(filteredData, degreeMap, workspaceFolders, statsHistory);
   }
 
   // Show/hide empty state message

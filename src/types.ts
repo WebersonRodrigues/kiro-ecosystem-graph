@@ -384,6 +384,9 @@ export interface CognitiveAnalysisResult {
     unresolvedNodes: number;
     status: 'connected' | 'partially-connected';
   }[];
+
+  /** Unified health score computed from all cognitive rules */
+  healthScore?: UnifiedHealthScore;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -543,6 +546,40 @@ export interface FixIssueData {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Health Score
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Unified health score computed from all cognitive analysis rules.
+ * Each sub-score represents a category (0-100), and the total score
+ * is a weighted combination: connectivity×0.3 + contentQuality×0.25 + completeness×0.25 + maturity×0.2.
+ */
+export interface UnifiedHealthScore {
+  /** Overall health score (0-100, integer) */
+  score: number;
+  /** Connectivity sub-score: proportion of nodes without structural issues (0-100) */
+  connectivity: number;
+  /** Content quality sub-score: proportion of nodes without content issues (0-100) */
+  contentQuality: number;
+  /** Completeness sub-score: proportion of nodes without completeness issues (0-100) */
+  completeness: number;
+  /** Maturity sub-score: based on quality gate, DML protection, hook coverage, decision path (0-100) */
+  maturity: number;
+}
+
+/**
+ * Trend indicator comparing the current health score with the previous snapshot.
+ */
+export interface ScoreTrend {
+  /** Direction of change relative to previous snapshot */
+  direction: 'up' | 'down' | 'neutral';
+  /** Absolute difference between current and previous score */
+  delta: number;
+  /** Score from the previous snapshot used for comparison */
+  previousScore: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Extension <-> Webview Communication
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -589,6 +626,8 @@ export interface DailySnapshot {
   nodeCount: number;
   /** Total number of edges in the graph on this date */
   edgeCount: number;
+  /** Unified health score at the time of snapshot (0-100) */
+  healthScore?: number;
 }
 
 /**

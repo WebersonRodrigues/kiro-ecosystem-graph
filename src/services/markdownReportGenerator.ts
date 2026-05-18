@@ -1,13 +1,18 @@
-import type { CognitiveAnalysisResult } from '../types';
+import type { CognitiveAnalysisResult, DailySnapshot } from '../types';
+import { computeScoreTrend } from './healthScoreCalculator';
 
 /**
  * Generates a structured Markdown report from cognitive analysis results.
  * The report is designed to be fed directly to Kiro AI for automated resolution.
  *
  * @param data - The cognitive analysis result from the webview panel
+ * @param statsHistory - Optional daily snapshots for trend calculation
  * @returns Complete Markdown string ready to be saved as a .md file
  */
-export function generateCognitiveReport(data: CognitiveAnalysisResult): string {
+export function generateCognitiveReport(
+  data: CognitiveAnalysisResult,
+  statsHistory?: DailySnapshot[],
+): string {
   const timestamp = new Date().toISOString();
   const lines: string[] = [];
 
@@ -17,6 +22,7 @@ export function generateCognitiveReport(data: CognitiveAnalysisResult): string {
   lines.push('');
 
   appendSummaryTable(lines, data);
+  appendHealthScore(lines, data, statsHistory);
   appendOrphanSteerings(lines, data);
   appendFragileLinks(lines, data);
   appendIsolatedFiles(lines, data);
@@ -67,7 +73,33 @@ function appendSummaryTable(lines: string[], data: CognitiveAnalysisResult): voi
   lines.push(`| Hook Coverage | ${data.hookCoverageMap ? data.hookCoverageMap.covered.length : 0}/10 |`);
   lines.push(`| Quality Gate Level | ${data.qualityGate ? data.qualityGate.maturityLevel : 0}/2 |`);
   lines.push(`| DML Protection Level | ${data.dmlProtection ? data.dmlProtection.maturityLevel : 0}/2 |`);
+  if (data.healthScore) {
+    lines.push(`| **Health Score** | **${data.healthScore.score}/100** |`);
+  }
   lines.push('');
+}
+
+function appendHealthScore(
+  lines: string[],
+  data: CognitiveAnalysisResult,
+  statsHistory?: DailySnapshot[],
+): void {
+  if (!data.healthScore) { return; }
+  const hs = data.healthScore;
+  lines.push('## Health Score');
+  lines.push('');
+  let scoreLine = `**Score: ${hs.score}/100** (Connectivity: ${hs.connectivity} | Content Quality: ${hs.contentQuality} | Completeness: ${hs.completeness} | Maturity: ${hs.maturity})`;
+  lines.push(scoreLine);
+  lines.push('');
+
+  if (statsHistory && statsHistory.length > 0) {
+    const trend = computeScoreTrend(hs.score, statsHistory);
+    if (trend) {
+      const arrow = trend.direction === 'up' ? '↑' : trend.direction === 'down' ? '↓' : '→';
+      lines.push(`**Trend:** ${arrow} ${trend.delta} (previous: ${trend.previousScore}/100)`);
+      lines.push('');
+    }
+  }
 }
 
 function appendOrphanSteerings(lines: string[], data: CognitiveAnalysisResult): void {

@@ -837,6 +837,48 @@ var CognitivePanel = (function () {
     return imperativePattern.test(content);
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Health Score Computation
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Compute unified health score from analysis data.
+   * Formula: connectivity×0.3 + contentQuality×0.25 + completeness×0.25 + maturity×0.2
+   * @param {object} analysis - Partial analysis result with issue arrays
+   * @param {number} totalNodes - Total number of nodes in the graph
+   * @returns {{ score: number, connectivity: number, contentQuality: number, completeness: number, maturity: number }}
+   */
+  function computeHealthScore(analysis, totalNodes) {
+    if (totalNodes === 0) {
+      return { score: 0, connectivity: 0, contentQuality: 0, completeness: 0, maturity: 0 };
+    }
+
+    var connectivityIssues = analysis.steeringsSoltos.length + analysis.vinculosFrageis.length +
+      analysis.arquivosSemContexto.length + analysis.coverageGaps.length +
+      (analysis.deadLoops || []).length + (analysis.hopsToReach || []).length;
+    var connectivity = Math.round(Math.max(0, 100 - (connectivityIssues / totalNodes) * 100));
+
+    var contentIssues = (analysis.passiveKnowledge || []).length + (analysis.signalToNoise || []).length +
+      (analysis.duplicateIntent || []).length + (analysis.contradictions || []).length;
+    var contentQuality = Math.round(Math.max(0, 100 - (contentIssues / totalNodes) * 100));
+
+    var completenessIssues = analysis.hooksWithoutInstruction.length + analysis.steeringsWithoutAccess.length +
+      analysis.weakInstructions.length + analysis.contextOverload.length;
+    var completeness = Math.round(Math.max(0, 100 - (completenessIssues / totalNodes) * 100));
+
+    var qg = (analysis.qualityGate ? analysis.qualityGate.maturityLevel : 0) / 2 * 100;
+    var dml = (analysis.dmlProtection ? analysis.dmlProtection.maturityLevel : 0) / 2 * 100;
+    var hc = analysis.hookCoverageMap ? (analysis.hookCoverageMap.covered.length / 10) * 100 : 0;
+    var dpIssues = (analysis.decisionPathCompleteness ?
+      analysis.decisionPathCompleteness.hooksWithoutDecisionSteering.length +
+      analysis.decisionPathCompleteness.steeringsWithoutHook.length : 0);
+    var dp = dpIssues === 0 ? 100 : Math.max(0, 100 - dpIssues * 20);
+    var maturity = Math.round((qg + dml + hc + dp) / 4);
+
+    var score = Math.round(connectivity * 0.3 + contentQuality * 0.25 + completeness * 0.25 + maturity * 0.2);
+    return { score: score, connectivity: connectivity, contentQuality: contentQuality, completeness: completeness, maturity: maturity };
+  }
+
   /**
    * Compute cognitive analysis from graph data.
    * @param {{ nodes: any[], links: any[] }} data
@@ -1168,6 +1210,26 @@ var CognitivePanel = (function () {
       dmlProtection: dmlProtection,
       brokenExternalLinks: brokenExternalLinks,
       crossWorkspaceTopology: crossWorkspaceTopology,
+      healthScore: computeHealthScore({
+        steeringsSoltos: steeringsSoltos,
+        vinculosFrageis: vinculosFrageis,
+        arquivosSemContexto: arquivosSemContexto,
+        coverageGaps: coverageGaps,
+        weakInstructions: weakInstructions,
+        contextOverload: contextOverload,
+        hooksWithoutInstruction: hooksWithoutInstruction,
+        steeringsWithoutAccess: steeringsWithoutAccess,
+        deadLoops: deadLoops,
+        hopsToReach: hopsToReach,
+        duplicateIntent: duplicateIntent,
+        passiveKnowledge: passiveKnowledge,
+        signalToNoise: signalToNoise,
+        contradictions: contradictions,
+        hookCoverageMap: hookCoverageMap,
+        decisionPathCompleteness: decisionPathCompleteness,
+        qualityGate: qualityGate,
+        dmlProtection: dmlProtection,
+      }, data.nodes.length),
     };
   }
 
@@ -1363,10 +1425,54 @@ var CognitivePanel = (function () {
   }
 
   /**
+   * Render health score and trend in the panel header area.
+   * Occupies max one line between title and export button.
+   */
+  function renderHeaderScore(analysis, statsHistoryData) {
+    var existing = document.getElementById('cognitive-health-score');
+    if (existing) { existing.remove(); }
+
+    if (!analysis || !analysis.healthScore) { return; }
+
+    var score = analysis.healthScore.score;
+    var scoreColor = score >= 75 ? '#4CAF50' : score >= 50 ? '#FF9800' : '#F44336';
+
+    var scoreSpan = document.createElement('span');
+    scoreSpan.id = 'cognitive-health-score';
+    scoreSpan.style.cssText = 'font-size:10px;margin-left:6px;white-space:nowrap;';
+
+    var scoreText = '<span style="color:' + scoreColor + ';font-weight:bold;">' + score + '/100</span>';
+
+    // Trend indicator from statsHistory
+    var trendText = '';
+    if (statsHistoryData && statsHistoryData.length > 0) {
+      var previousScore = null;
+      for (var i = statsHistoryData.length - 1; i >= 0; i--) {
+        if (statsHistoryData[i].healthScore !== undefined) {
+          previousScore = statsHistoryData[i].healthScore;
+          break;
+        }
+      }
+      if (previousScore !== null) {
+        var delta = score - previousScore;
+        var arrow = delta > 0 ? '\u2191' : delta < 0 ? '\u2193' : '\u2192';
+        var trendColor = delta > 0 ? '#4CAF50' : delta < 0 ? '#F44336' : '#666';
+        trendText = ' <span style="color:' + trendColor + ';">' + arrow + Math.abs(delta) + '</span>';
+      }
+    }
+
+    scoreSpan.innerHTML = scoreText + trendText;
+
+    // Insert after title, before export button
+    title.parentNode.insertBefore(scoreSpan, exportBtn);
+  }
+
+  /**
    * Render the analysis results into the panel.
    * @param {object} analysis
+   * @param {Array} statsHistoryData - Optional stats history for trend calculation
    */
-  function renderPanel(analysis) {
+  function renderPanel(analysis, statsHistoryData) {
     var content = document.getElementById('cognitive-content');
     if (!content) { return; }
 
@@ -1378,8 +1484,14 @@ var CognitivePanel = (function () {
 
     if (!analysis) {
       content.innerHTML = '<span style="color:#666;">No data available</span>';
+      // Remove score display from header
+      var existingScore = document.getElementById('cognitive-health-score');
+      if (existingScore) { existingScore.remove(); }
       return;
     }
+
+    // Render health score in header (between title and export button)
+    renderHeaderScore(analysis, statsHistoryData);
 
     var html = '';
 
@@ -1802,11 +1914,12 @@ var CognitivePanel = (function () {
  * @param {{ nodes: any[], links: any[] }} data
  * @param {Map<string, number>} degrees
  * @param {string[]} workspaceFolders
+ * @param {Array} statsHistoryData - Optional stats history for trend
  */
 // eslint-disable-next-line no-unused-vars
-function updateCognitivePanel(data, degrees, workspaceFolders) {
+function updateCognitivePanel(data, degrees, workspaceFolders, statsHistoryData) {
   if (typeof CognitivePanel !== 'undefined') {
     var analysis = CognitivePanel.computeAnalysis(data, degrees, workspaceFolders);
-    CognitivePanel.renderPanel(analysis);
+    CognitivePanel.renderPanel(analysis, statsHistoryData);
   }
 }
