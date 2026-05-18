@@ -122,6 +122,7 @@ let settings = {
   labelMode: 'auto',
   showOnlyExisting: false,
   showOrphans: true,
+  showMinimap: true,
 };
 
 // Load saved state
@@ -1261,6 +1262,11 @@ function handleUpdateGraph(data) {
   if (emptyMsg) {
     emptyMsg.style.display = filteredData.nodes.length === 0 ? 'block' : 'none';
   }
+
+  // Update minimap with filtered nodes
+  if (typeof MinimapModule !== 'undefined') {
+    MinimapModule.update(filteredData.nodes);
+  }
 }
 
 /**
@@ -1401,6 +1407,11 @@ function reapplyFilters() {
   if (emptyMsg) {
     emptyMsg.style.display = filteredData.nodes.length === 0 ? 'block' : 'none';
   }
+
+  // Update minimap visibility when filters change
+  if (typeof MinimapModule !== 'undefined') {
+    MinimapModule.update(filteredData.nodes);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1422,6 +1433,11 @@ function updateSetting(key, value) {
   // Re-apply filters if relevant settings changed
   if (key === 'showOnlyExisting' || key === 'showOrphans') {
     reapplyFilters();
+  }
+
+  // Update minimap visibility when toggle changes
+  if (key === 'showMinimap' && typeof MinimapModule !== 'undefined') {
+    MinimapModule.updateVisibility();
   }
 }
 

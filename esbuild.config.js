@@ -25,7 +25,7 @@ function copyWebviewFiles() {
     fs.mkdirSync(distDir, { recursive: true });
   }
 
-  const filesToCopy = ['webview.js', 'settings-panel.js', 'filter-panel.js', 'health-panel.js', 'interactions-panel.js', 'gap-detector.js', 'alternative-views.js', 'visual-modes.js', 'export-panel.js', 'cognitive-panel.js', 'shape-legend.js', 'renderer-manager.js'];
+  const filesToCopy = ['webview.js', 'settings-panel.js', 'filter-panel.js', 'health-panel.js', 'interactions-panel.js', 'gap-detector.js', 'alternative-views.js', 'visual-modes.js', 'export-panel.js', 'cognitive-panel.js', 'shape-legend.js', 'renderer-manager.js', 'minimap.js'];
 
   for (const file of filesToCopy) {
     const src = path.join(mediaDir, file);

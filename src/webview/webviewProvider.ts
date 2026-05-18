@@ -336,6 +336,7 @@ export class EcosystemGraphProvider implements vscode.WebviewViewProvider {
     const forceGraphUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'force-graph.min.js'));
     const rendererManagerUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'renderer-manager.js'));
     const forceGraph3DUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, '3d-force-graph.min.js'));
+    const minimapUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'minimap.js'));
 
     return /* html */ `<!DOCTYPE html>
 <html lang="en">
@@ -783,6 +784,7 @@ export class EcosystemGraphProvider implements vscode.WebviewViewProvider {
   <script nonce="${nonce}" src="${settingsPanelUri}"></script>
   <script nonce="${nonce}" src="${cognitivePanelUri}"></script>
   <script nonce="${nonce}" src="${shapeLegendUri}"></script>
+  <script nonce="${nonce}" src="${minimapUri}"></script>
 </body>
 </html>`;
   }

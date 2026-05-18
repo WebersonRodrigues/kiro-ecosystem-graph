@@ -317,6 +317,8 @@ export interface GraphSettings {
   showOnlyExisting: boolean;
   /** When true, show nodes with no connections (default true) */
   showOrphans: boolean;
+  /** When true, show the minimap overlay (default true) */
+  showMinimap?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

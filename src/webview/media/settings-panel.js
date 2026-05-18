@@ -70,6 +70,7 @@
   wireCheckbox('toggle-showArrows', 'showArrows');
   wireCheckbox('toggle-showOnlyExisting', 'showOnlyExisting');
   wireCheckbox('toggle-showOrphans', 'showOrphans');
+  wireCheckbox('toggle-showMinimap', 'showMinimap');
 
   wireRadioGroup('labelMode', 'labelMode');
 
@@ -120,6 +121,7 @@
       '<div class="section-header">Filters</div>',
       buildCheckboxRow('Only existing files', 'toggle-showOnlyExisting', false),
       buildCheckboxRow('Show orphan nodes', 'toggle-showOrphans', true),
+      buildCheckboxRow('Show Minimap', 'toggle-showMinimap', true),
       '</div>',
 
       // Animate button
@@ -216,6 +218,7 @@
     setCheckboxValue('toggle-showArrows', settings.showArrows);
     setCheckboxValue('toggle-showOnlyExisting', settings.showOnlyExisting);
     setCheckboxValue('toggle-showOrphans', settings.showOrphans);
+    setCheckboxValue('toggle-showMinimap', settings.showMinimap !== false);
 
     setRadioValue('labelMode', settings.labelMode);
   }
