@@ -1483,3 +1483,181 @@ describe('Stale Content Detection (Property)', function () {
     );
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Link Recommender (Suggested Connections)
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { computeLinkSuggestions } from '../../services/cognitiveValidations';
+
+describe('Cognitive Validations — Link Recommender (Property)', function () {
+  this.timeout(30000);
+
+  // Arbitrary: generate a list of unique keyword strings
+  const keywordArb = fc.stringOf(
+    fc.constantFrom('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n'),
+    { minLength: 3, maxLength: 6 },
+  );
+
+  const keywordListArb = fc.uniqueArray(keywordArb, { minLength: 3, maxLength: 12 });
+
+  // Arbitrary: generate steering nodes with keywords
+  const steeringNodesArb = fc.array(
+    fc.tuple(
+      fc.integer({ min: 0, max: 99 }),
+      keywordListArb,
+    ).map(([idx, keywords]) => makeNode(`s${idx}.md`, {
+      type: 'steering-domain',
+      metadata: { keywords },
+    })),
+    { minLength: 2, maxLength: 8 },
+  ).map((nodes) => {
+    // Ensure unique IDs
+    const seen = new Set<string>();
+    return nodes.filter((n) => {
+      if (seen.has(n.id)) { return false; }
+      seen.add(n.id);
+      return true;
+    });
+  }).filter((nodes) => nodes.length >= 2);
+
+  // Arbitrary: generate edges between some node pairs
+  const edgesFromNodesArb = (nodes: GraphNode[]) => fc.array(
+    fc.tuple(
+      fc.integer({ min: 0, max: nodes.length - 1 }),
+      fc.integer({ min: 0, max: nodes.length - 1 }),
+    ).filter(([a, b]) => a !== b)
+      .map(([a, b]) => ({
+        source: nodes[a].id,
+        target: nodes[b].id,
+        type: 'wiki-link' as const,
+      })),
+    { minLength: 0, maxLength: nodes.length },
+  );
+
+  /**
+   * **Validates: Requirements 2.1, 2.2, 2.3**
+   *
+   * Property: All suggestions have similarityScore in [30, 60).
+   */
+  it('all scores in results are in [30, 60)', function () {
+    fc.assert(
+      fc.property(steeringNodesArb, (nodes) => {
+        const result = computeLinkSuggestions(nodes, []);
+        for (const suggestion of result) {
+          assert.ok(
+            suggestion.similarityScore >= 30,
+            `Score ${suggestion.similarityScore} should be >= 30`,
+          );
+          assert.ok(
+            suggestion.similarityScore < 60,
+            `Score ${suggestion.similarityScore} should be < 60`,
+          );
+        }
+      }),
+      { numRuns: 100 },
+    );
+  });
+
+  /**
+   * **Validates: Requirements 4.1**
+   *
+   * Property: Results are always sorted by similarityScore descending.
+   */
+  it('results are sorted by similarityScore descending', function () {
+    fc.assert(
+      fc.property(steeringNodesArb, (nodes) => {
+        const result = computeLinkSuggestions(nodes, []);
+        for (let i = 1; i < result.length; i++) {
+          assert.ok(
+            result[i - 1].similarityScore >= result[i].similarityScore,
+            `Result[${i - 1}].score (${result[i - 1].similarityScore}) should be >= Result[${i}].score (${result[i].similarityScore})`,
+          );
+        }
+      }),
+      { numRuns: 100 },
+    );
+  });
+
+  /**
+   * **Validates: Requirements 4.2, 4.3**
+   *
+   * Property: Maximum 10 results regardless of input size.
+   */
+  it('count is always <= 10', function () {
+    // Generate many nodes to potentially produce > 10 pairs
+    const manyNodesArb = fc.array(
+      fc.integer({ min: 0, max: 50 }).map((idx) => makeNode(`n${idx}.md`, {
+        type: 'steering-domain',
+        metadata: { keywords: ['shared1', 'shared2', `unique-${idx}`] },
+      })),
+      { minLength: 5, maxLength: 20 },
+    ).map((nodes) => {
+      const seen = new Set<string>();
+      return nodes.filter((n) => {
+        if (seen.has(n.id)) { return false; }
+        seen.add(n.id);
+        return true;
+      });
+    });
+
+    fc.assert(
+      fc.property(manyNodesArb, (nodes) => {
+        const result = computeLinkSuggestions(nodes, []);
+        assert.ok(
+          result.length <= 10,
+          `Result count (${result.length}) should be <= 10`,
+        );
+      }),
+      { numRuns: 50 },
+    );
+  });
+
+  /**
+   * **Validates: Requirements 1.1**
+   *
+   * Property: No suggestion has a direct edge in the graph.
+   */
+  it('no suggestion has a direct edge between its pair', function () {
+    fc.assert(
+      fc.property(
+        steeringNodesArb.chain((nodes) =>
+          edgesFromNodesArb(nodes).map((edges) => ({ nodes, edges })),
+        ),
+        ({ nodes, edges }) => {
+          const edgeSet = new Set<string>();
+          for (const e of edges) {
+            edgeSet.add(`${e.source}|||${e.target}`);
+            edgeSet.add(`${e.target}|||${e.source}`);
+          }
+
+          const result = computeLinkSuggestions(nodes, edges);
+          for (const suggestion of result) {
+            const key = `${suggestion.nodeA.id}|||${suggestion.nodeB.id}`;
+            assert.ok(
+              !edgeSet.has(key),
+              `Suggestion ${suggestion.nodeA.id} <-> ${suggestion.nodeB.id} should NOT have a direct edge`,
+            );
+          }
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+
+  /**
+   * **Validates: Requirements 7.2**
+   *
+   * Property: computeLinkSuggestions is idempotent (same input = same output).
+   */
+  it('computation is idempotent', function () {
+    fc.assert(
+      fc.property(steeringNodesArb, (nodes) => {
+        const result1 = computeLinkSuggestions(nodes, []);
+        const result2 = computeLinkSuggestions(nodes, []);
+        assert.deepStrictEqual(result1, result2);
+      }),
+      { numRuns: 50 },
+    );
+  });
+});

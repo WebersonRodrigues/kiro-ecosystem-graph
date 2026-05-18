@@ -390,6 +390,25 @@ export interface CognitiveAnalysisResult {
 
   /** Steerings flagged as stale content with high connectivity (Rule 20) */
   staleContent?: StaleContentAlert[];
+
+  /** Suggested connections between steerings with keyword overlap (Link Recommender) */
+  suggestedConnections?: LinkSuggestion[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Link Recommender Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A suggested connection between two steerings with keyword overlap */
+export interface LinkSuggestion {
+  /** First steering of the pair */
+  nodeA: { id: string; label: string };
+  /** Second steering of the pair */
+  nodeB: { id: string; label: string };
+  /** Similarity score percentage (0-100) */
+  similarityScore: number;
+  /** Keywords shared between both steerings */
+  sharedKeywords: string[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

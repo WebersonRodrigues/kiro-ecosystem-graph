@@ -19,6 +19,7 @@ import type {
   QualityGateResult,
   DmlProtectionResult,
   StaleContentAlert,
+  LinkSuggestion,
 } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -983,4 +984,124 @@ function passesThreshold(
   const passesStale = stalenessThreshold <= 0 || stalenessDays >= stalenessThreshold;
   const passesDegree = degreeThreshold <= 0 || degree >= degreeThreshold;
   return passesStale && passesDegree;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Link Recommender (Suggested Connections)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Options for link suggestion computation */
+export interface LinkRecommenderOptions {
+  /** Minimum overlap percentage to suggest (default: 30) */
+  overlapThreshold?: number;
+  /** Maximum number of suggestions to return (default: 10) */
+  maxRecommendations?: number;
+}
+
+/**
+ * Computes link suggestions between steering nodes that share keywords
+ * but have no direct edge. Excludes pairs already flagged by Duplicate Intent.
+ *
+ * @param nodes - All graph nodes
+ * @param edges - All graph edges
+ * @param duplicateIntentPairs - Pairs already flagged by Duplicate Intent
+ * @param options - Threshold and limit options
+ * @returns Array of link suggestions sorted by similarityScore descending
+ */
+export function computeLinkSuggestions(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  duplicateIntentPairs?: DuplicatePair[],
+  options?: LinkRecommenderOptions,
+): LinkSuggestion[] {
+  const threshold = options?.overlapThreshold ?? 30;
+  const maxResults = options?.maxRecommendations ?? 10;
+
+  const steeringNodes = filterSteeringWithKeywords(nodes);
+  const connectedSet = buildConnectedPairSet(edges);
+  const duplicateSet = buildDuplicateSet(duplicateIntentPairs);
+
+  const candidates = collectCandidates(
+    steeringNodes, connectedSet, duplicateSet, threshold,
+  );
+
+  return candidates
+    .sort((a, b) => b.similarityScore - a.similarityScore)
+    .slice(0, maxResults);
+}
+
+function filterSteeringWithKeywords(nodes: GraphNode[]): GraphNode[] {
+  return nodes.filter(
+    (n) => n.type && n.type.startsWith('steering-') &&
+      n.metadata?.keywords && n.metadata.keywords.length > 0,
+  );
+}
+
+function buildConnectedPairSet(edges: GraphEdge[]): Set<string> {
+  const set = new Set<string>();
+  for (const edge of edges) {
+    set.add(`${edge.source}|||${edge.target}`);
+    set.add(`${edge.target}|||${edge.source}`);
+  }
+  return set;
+}
+
+function buildDuplicateSet(pairs?: DuplicatePair[]): Set<string> {
+  const set = new Set<string>();
+  if (!pairs) { return set; }
+  for (const pair of pairs) {
+    set.add(`${pair.nodeA.id}|||${pair.nodeB.id}`);
+    set.add(`${pair.nodeB.id}|||${pair.nodeA.id}`);
+  }
+  return set;
+}
+
+function collectCandidates(
+  steeringNodes: GraphNode[],
+  connectedSet: Set<string>,
+  duplicateSet: Set<string>,
+  threshold: number,
+): LinkSuggestion[] {
+  const candidates: LinkSuggestion[] = [];
+
+  for (let i = 0; i < steeringNodes.length; i++) {
+    for (let j = i + 1; j < steeringNodes.length; j++) {
+      const a = steeringNodes[i];
+      const b = steeringNodes[j];
+
+      if (connectedSet.has(`${a.id}|||${b.id}`)) { continue; }
+      if (duplicateSet.has(`${a.id}|||${b.id}`)) { continue; }
+
+      const suggestion = evaluatePair(a, b, threshold);
+      if (suggestion) { candidates.push(suggestion); }
+    }
+  }
+
+  return candidates;
+}
+
+function evaluatePair(
+  a: GraphNode,
+  b: GraphNode,
+  threshold: number,
+): LinkSuggestion | null {
+  const keywordsA = a.metadata!.keywords!;
+  const keywordsB = b.metadata!.keywords!;
+  const overlap = computeKeywordOverlap(keywordsA, keywordsB);
+
+  if (overlap < threshold || overlap >= 60) { return null; }
+
+  const shared = computeSharedKeywords(keywordsA, keywordsB);
+
+  return {
+    nodeA: { id: a.id, label: a.label },
+    nodeB: { id: b.id, label: b.label },
+    similarityScore: overlap,
+    sharedKeywords: shared,
+  };
+}
+
+function computeSharedKeywords(keywordsA: string[], keywordsB: string[]): string[] {
+  const setB = new Set(keywordsB);
+  return keywordsA.filter((kw) => setB.has(kw));
 }

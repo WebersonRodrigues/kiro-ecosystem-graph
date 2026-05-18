@@ -487,3 +487,147 @@ describe('CognitiveValidations — detectStaleContent()', function () {
     assert.strictEqual(result.length, 0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { computeLinkSuggestions } from '../../services/cognitiveValidations';
+
+describe('CognitiveValidations — computeLinkSuggestions()', function () {
+  it('suggests pair with 45% overlap and no direct edge', function () {
+    // 5 keywords each, sharing 3 → overlap = 3/5 * 100 = 60%? No.
+    // Need to craft: min(|A|,|B|) = 5, intersection = 2 → 40%
+    // Actually: 10 keywords in A, 5 in B, 3 shared → 3/5 * 100 = 60% (too high)
+    // Let's do: A has 4 keywords, B has 4 keywords, 2 shared → 2/4 * 100 = 50%
+    const nodes: GraphNode[] = [
+      makeNode('a.md', { type: 'steering-domain', metadata: { keywords: ['auth', 'login', 'session', 'token'] } }),
+      makeNode('b.md', { type: 'steering-domain', metadata: { keywords: ['auth', 'login', 'password', 'hash'] } }),
+    ];
+    const edges: GraphEdge[] = [];
+    const result = computeLinkSuggestions(nodes, edges);
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].nodeA.id, 'a.md');
+    assert.strictEqual(result[0].nodeB.id, 'b.md');
+    assert.strictEqual(result[0].similarityScore, 50);
+    assert.deepStrictEqual(result[0].sharedKeywords, ['auth', 'login']);
+  });
+
+  it('excludes pair with overlap >= 60%', function () {
+    // A has 5 keywords, B has 5 keywords, 4 shared → 4/5 * 100 = 80%
+    const nodes: GraphNode[] = [
+      makeNode('a.md', { type: 'steering-domain', metadata: { keywords: ['a', 'b', 'c', 'd', 'e'] } }),
+      makeNode('b.md', { type: 'steering-domain', metadata: { keywords: ['a', 'b', 'c', 'd', 'f'] } }),
+    ];
+    const edges: GraphEdge[] = [];
+    const result = computeLinkSuggestions(nodes, edges);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('excludes pair with overlap < 30%', function () {
+    // A has 5 keywords, B has 5 keywords, 1 shared → 1/5 * 100 = 20%
+    const nodes: GraphNode[] = [
+      makeNode('a.md', { type: 'steering-domain', metadata: { keywords: ['a', 'b', 'c', 'd', 'e'] } }),
+      makeNode('b.md', { type: 'steering-domain', metadata: { keywords: ['a', 'x', 'y', 'z', 'w'] } }),
+    ];
+    const edges: GraphEdge[] = [];
+    const result = computeLinkSuggestions(nodes, edges);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('excludes pair already connected by edge', function () {
+    const nodes: GraphNode[] = [
+      makeNode('a.md', { type: 'steering-domain', metadata: { keywords: ['auth', 'login', 'session', 'token'] } }),
+      makeNode('b.md', { type: 'steering-domain', metadata: { keywords: ['auth', 'login', 'password', 'hash'] } }),
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'a.md', target: 'b.md', type: 'wiki-link' },
+    ];
+    const result = computeLinkSuggestions(nodes, edges);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('excludes pair present in duplicateIntentPairs', function () {
+    const nodes: GraphNode[] = [
+      makeNode('a.md', { type: 'steering-domain', metadata: { keywords: ['auth', 'login', 'session', 'token'] } }),
+      makeNode('b.md', { type: 'steering-domain', metadata: { keywords: ['auth', 'login', 'password', 'hash'] } }),
+    ];
+    const edges: GraphEdge[] = [];
+    const duplicates = [
+      { nodeA: { id: 'a.md', label: 'a' }, nodeB: { id: 'b.md', label: 'b' }, overlap: 65 },
+    ];
+    const result = computeLinkSuggestions(nodes, edges, duplicates);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('skips nodes without keywords (score 0)', function () {
+    const nodes: GraphNode[] = [
+      makeNode('a.md', { type: 'steering-domain', metadata: { keywords: ['auth', 'login'] } }),
+      makeNode('b.md', { type: 'steering-domain', metadata: {} }),
+    ];
+    const edges: GraphEdge[] = [];
+    const result = computeLinkSuggestions(nodes, edges);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('orders results by similarityScore descending', function () {
+    // Pair A-B: 2/4 = 50%, Pair A-C: 3/5 = 60% (excluded), Pair B-C: need to craft
+    // A: [a,b,c,d], B: [a,b,x,y,z,w] → 2/4 = 50%
+    // A: [a,b,c,d], C: [a,c,e,f,g,h,i,j] → 2/4 = 50%
+    // B: [a,b,x,y,z,w], C: [a,c,e,f,g,h,i,j] → 1/6 = 17% (excluded)
+    // Let's use different setup:
+    // A: [a,b,c,d,e,f,g,h,i,j] (10 kw), B: [a,b,c,d,x] (5 kw) → 4/5 = 80% (too high)
+    // Simpler: A=[a,b,c,d,e], B=[a,b,x,y,z] → 2/5=40%, A=[a,b,c,d,e], C=[a,b,c,x,y] → 3/5=60% (excluded)
+    // B=[a,b,x,y,z], C=[a,b,c,x,y] → 3/5=60% (excluded)
+    // Let's just use 3 pairs with different overlaps:
+    const nodes: GraphNode[] = [
+      makeNode('a.md', { type: 'steering-domain', metadata: { keywords: ['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7', 'k8', 'k9', 'k10'] } }),
+      makeNode('b.md', { type: 'steering-domain', metadata: { keywords: ['k1', 'k2', 'k3', 'x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7'] } }),
+      makeNode('c.md', { type: 'steering-domain', metadata: { keywords: ['k1', 'k2', 'k3', 'k4', 'k5', 'y1', 'y2', 'y3', 'y4', 'y5'] } }),
+    ];
+    const edges: GraphEdge[] = [];
+    const result = computeLinkSuggestions(nodes, edges);
+    // A-B: 3/10 = 30%, A-C: 5/10 = 50%, B-C: 3/10 = 30%
+    assert.ok(result.length >= 2);
+    assert.ok(result[0].similarityScore >= result[1].similarityScore);
+  });
+
+  it('limits to 10 suggestions when more pairs are eligible', function () {
+    // Create 12 steering nodes with pairwise 50% overlap
+    const nodes: GraphNode[] = [];
+    for (let i = 0; i < 12; i++) {
+      const keywords = ['shared1', 'shared2', `unique-${i}-a`, `unique-${i}-b`];
+      nodes.push(makeNode(`s${i}.md`, { type: 'steering-domain', metadata: { keywords } }));
+    }
+    const edges: GraphEdge[] = [];
+    const result = computeLinkSuggestions(nodes, edges);
+    assert.ok(result.length <= 10);
+  });
+
+  it('returns empty array for empty graph', function () {
+    const result = computeLinkSuggestions([], []);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('includes pair at exactly 30% overlap', function () {
+    // A has 10 keywords, B has 10 keywords, 3 shared → 3/10 * 100 = 30%
+    const nodes: GraphNode[] = [
+      makeNode('a.md', { type: 'steering-domain', metadata: { keywords: ['k1', 'k2', 'k3', 'a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7'] } }),
+      makeNode('b.md', { type: 'steering-domain', metadata: { keywords: ['k1', 'k2', 'k3', 'b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7'] } }),
+    ];
+    const edges: GraphEdge[] = [];
+    const result = computeLinkSuggestions(nodes, edges);
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].similarityScore, 30);
+  });
+
+  it('excludes pair at exactly 59% overlap (included) vs 60% (excluded)', function () {
+    // 59% is included: need intersection/min = 0.59 → hard to get exact with integers
+    // Let's test 60% is excluded: A has 5 kw, B has 5 kw, 3 shared → 3/5 = 60% (excluded)
+    const nodes: GraphNode[] = [
+      makeNode('a.md', { type: 'steering-domain', metadata: { keywords: ['k1', 'k2', 'k3', 'a1', 'a2'] } }),
+      makeNode('b.md', { type: 'steering-domain', metadata: { keywords: ['k1', 'k2', 'k3', 'b1', 'b2'] } }),
+    ];
+    const edges: GraphEdge[] = [];
+    const result = computeLinkSuggestions(nodes, edges);
+    assert.strictEqual(result.length, 0); // 60% is excluded
+  });
+});

@@ -520,6 +520,90 @@ var CognitivePanel = (function () {
     return results;
   }
 
+  /**
+   * Compute link suggestions between steerings with keyword overlap but no direct edge.
+   * Excludes pairs already flagged by Duplicate Intent.
+   * @param {any[]} nodes
+   * @param {any[]} links
+   * @param {any[]} duplicateIntentPairs
+   * @returns {{ nodeA: {id,label}, nodeB: {id,label}, similarityScore: number, sharedKeywords: string[] }[]}
+   */
+  function computeLinkSuggestionsWebview(nodes, links, duplicateIntentPairs) {
+    var THRESHOLD = 30;
+    var MAX_RESULTS = 10;
+
+    // Filter steering nodes with keywords
+    var steeringNodes = nodes.filter(function(n) {
+      return n.type && n.type.indexOf('steering-') === 0 &&
+        n.metadata && n.metadata.keywords && n.metadata.keywords.length > 0;
+    });
+
+    // Build connected pair set (bidirectional)
+    var connectedSet = {};
+    links.forEach(function(e) {
+      connectedSet[e.source + '|||' + e.target] = true;
+      connectedSet[e.target + '|||' + e.source] = true;
+    });
+
+    // Build duplicate intent set
+    var duplicateSet = {};
+    (duplicateIntentPairs || []).forEach(function(pair) {
+      duplicateSet[pair.nodeA.id + '|||' + pair.nodeB.id] = true;
+      duplicateSet[pair.nodeB.id + '|||' + pair.nodeA.id] = true;
+    });
+
+    var candidates = [];
+    for (var i = 0; i < steeringNodes.length; i++) {
+      for (var j = i + 1; j < steeringNodes.length; j++) {
+        var a = steeringNodes[i];
+        var b = steeringNodes[j];
+        var pairKey = a.id + '|||' + b.id;
+
+        if (connectedSet[pairKey]) { continue; }
+        if (duplicateSet[pairKey]) { continue; }
+
+        var kwA = a.metadata.keywords;
+        var kwB = b.metadata.keywords;
+        var overlap = computeKeywordOverlapWebview(kwA, kwB);
+
+        if (overlap < THRESHOLD || overlap >= 60) { continue; }
+
+        var setB = {};
+        kwB.forEach(function(kw) { setB[kw] = true; });
+        var shared = kwA.filter(function(kw) { return setB[kw]; });
+
+        candidates.push({
+          nodeA: { id: a.id, label: a.label },
+          nodeB: { id: b.id, label: b.label },
+          similarityScore: overlap,
+          sharedKeywords: shared,
+        });
+      }
+    }
+
+    candidates.sort(function(a, b) { return b.similarityScore - a.similarityScore; });
+    return candidates.slice(0, MAX_RESULTS);
+  }
+
+  /**
+   * Compute keyword overlap (webview version).
+   * @param {string[]} kwA
+   * @param {string[]} kwB
+   * @returns {number}
+   */
+  function computeKeywordOverlapWebview(kwA, kwB) {
+    if (!kwA || !kwB || kwA.length === 0 || kwB.length === 0) { return 0; }
+    var setA = {};
+    kwA.forEach(function(k) { setA[k] = true; });
+    var setB = {};
+    kwB.forEach(function(k) { setB[k] = true; });
+    var intersection = 0;
+    Object.keys(setA).forEach(function(k) { if (setB[k]) { intersection++; } });
+    var minSize = Math.min(Object.keys(setA).length, Object.keys(setB).length);
+    if (minSize === 0) { return 0; }
+    return Math.round((intersection / minSize) * 100);
+  }
+
   // ─── Structure Validations ─────────────────────────────────────────────
 
   /**
@@ -1157,6 +1241,9 @@ var CognitivePanel = (function () {
     // 12. Stale Content Detection (Rule 20)
     var staleContent = detectStaleContentWebview(data.nodes, data.links, incomingMap, outgoingMap);
 
+    // 13. Link Recommender (Suggested Connections)
+    var suggestedConnections = computeLinkSuggestionsWebview(data.nodes, data.links, duplicateIntent);
+
     // 11. Cross-Workspace Topology: group external nodes by workspace
     var crossWorkspaceTopology = [];
     var workspaceGroups = {};
@@ -1251,6 +1338,7 @@ var CognitivePanel = (function () {
       brokenExternalLinks: brokenExternalLinks,
       crossWorkspaceTopology: crossWorkspaceTopology,
       staleContent: staleContent,
+      suggestedConnections: suggestedConnections,
       healthScore: computeHealthScore({
         steeringsSoltos: steeringsSoltos,
         vinculosFrageis: vinculosFrageis,
@@ -1794,6 +1882,22 @@ var CognitivePanel = (function () {
       });
       if (analysis.staleContent.length > 5) {
         html += '<div style="padding-left:6px;color:#666;font-size:9px;">...and ' + (analysis.staleContent.length - 5) + ' more</div>';
+      }
+      html += '</div>';
+    }
+
+    // Suggested Connections (Link Recommender)
+    if (analysis.suggestedConnections && analysis.suggestedConnections.length > 0) {
+      html += '<div style="margin-bottom:6px;"><span style="color:#26A69A;font-weight:bold;">Conexões Sugeridas</span>';
+      html += ' <span style="color:#26A69A;">' + analysis.suggestedConnections.length + '</span>';
+      analysis.suggestedConnections.slice(0, 5).forEach(function(item) {
+        html += '<div style="padding-left:6px;color:#aaa;font-size:9px;">';
+        html += escapeHtml(item.nodeA.label) + ' \u2194 ' + escapeHtml(item.nodeB.label) + ' (' + item.similarityScore + '%)';
+        html += ' <a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.nodeA.id) + '" style="color:#26A69A;text-decoration:underline;cursor:pointer;font-size:8px;">Link</a>';
+        html += '</div>';
+      });
+      if (analysis.suggestedConnections.length > 5) {
+        html += '<div style="padding-left:6px;color:#666;font-size:9px;">...and ' + (analysis.suggestedConnections.length - 5) + ' more</div>';
       }
       html += '</div>';
     }

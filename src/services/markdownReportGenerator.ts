@@ -41,6 +41,7 @@ export function generateCognitiveReport(
   appendQualityGate(lines, data);
   appendDmlProtection(lines, data);
   appendStaleContent(lines, data);
+  appendSuggestedConnections(lines, data);
   appendRecommendations(lines, data);
   appendInstructionsForAI(lines, data);
 
@@ -409,6 +410,21 @@ function appendStaleContent(lines: string[], data: CognitiveAnalysisResult): voi
   lines.push('');
 }
 
+function appendSuggestedConnections(lines: string[], data: CognitiveAnalysisResult): void {
+  const items = data.suggestedConnections || [];
+  if (items.length === 0) { return; }
+  lines.push('## Suggested Connections');
+  lines.push('');
+  lines.push('Steerings with 30-59% keyword overlap but no direct link — consider connecting them.');
+  lines.push('');
+  lines.push('| Steering A | Steering B | Similarity % | Tip |');
+  lines.push('|-----------|-----------|-------------|-----|');
+  for (const item of items) {
+    lines.push(`| ${item.nodeA.label} | ${item.nodeB.label} | ${item.similarityScore}% | Add a cross-reference between these steerings to improve navigability |`);
+  }
+  lines.push('');
+}
+
 function appendRecommendations(lines: string[], data: CognitiveAnalysisResult): void {
   if (data.sugestoes.length === 0) { return; }
   lines.push('## Recommendations');
@@ -480,6 +496,9 @@ function appendInstructionsForAI(lines: string[], data: CognitiveAnalysisResult)
   }
   if ((data.staleContent || []).length > 0) {
     lines.push(`${step++}. For each Stale Content steering, review and update the content to reflect current practices.`);
+  }
+  if ((data.suggestedConnections || []).length > 0) {
+    lines.push(`${step++}. For each Suggested Connection, add a cross-reference between the two steerings.`);
   }
 
   lines.push('');

@@ -289,3 +289,53 @@ describe('MarkdownReportGenerator', function () {
     });
   });
 });
+
+  describe('Suggested Connections section', function () {
+    it('generates Suggested Connections section with valid data', function () {
+      const data = createMinimalResult();
+      data.suggestedConnections = [
+        {
+          nodeA: { id: 'auth.md', label: 'auth' },
+          nodeB: { id: 'login.md', label: 'login' },
+          similarityScore: 45,
+          sharedKeywords: ['session', 'token'],
+        },
+      ];
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('## Suggested Connections'));
+      assert.ok(report.includes('| auth | login | 45% |'));
+      assert.ok(report.includes('Add a cross-reference'));
+    });
+
+    it('omits Suggested Connections section when array is empty', function () {
+      const data = createMinimalResult();
+      data.suggestedConnections = [];
+
+      const report = generateCognitiveReport(data);
+      assert.ok(!report.includes('## Suggested Connections'));
+    });
+
+    it('omits Suggested Connections section when undefined', function () {
+      const data = createMinimalResult();
+      // suggestedConnections is undefined by default
+
+      const report = generateCognitiveReport(data);
+      assert.ok(!report.includes('## Suggested Connections'));
+    });
+
+    it('Instructions for AI includes suggested connections step', function () {
+      const data = createMinimalResult();
+      data.suggestedConnections = [
+        {
+          nodeA: { id: 'a.md', label: 'a' },
+          nodeB: { id: 'b.md', label: 'b' },
+          similarityScore: 35,
+          sharedKeywords: ['shared'],
+        },
+      ];
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('For each Suggested Connection, add a cross-reference'));
+    });
+  });
