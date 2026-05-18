@@ -445,6 +445,33 @@ security-policies.md (steering-policy)
 
 ---
 
+### 22. Circular Hook Dependencies (Infinite Loop Detection)
+
+**What it checks:** Cycles in the directed graph where the path includes at least one hook node. A cycle occurs when hook A references steering X, steering X references hook B, hook B references steering Y, and steering Y references hook A (or similar patterns).
+
+**Why it matters:** These cycles can cause infinite agent execution loops — the hook fires, loads the steering, which references another hook, which fires again, creating an endless chain. Unlike Dead Loops (Rule 9) which detects isolated SCCs purely between steerings, this rule detects ANY cycle that includes at least one hook.
+
+**Algorithm:**
+1. Filter nodes to hooks and steerings with `resolved !== false`
+2. Build directed adjacency list from edges between filtered nodes
+3. DFS with coloring (WHITE/GRAY/BLACK) and path tracking
+4. When a back-edge is found (neighbor is GRAY), extract the cycle from the path
+5. Keep only cycles containing at least one hook (`hook-auto` or `hook-manual`)
+6. Deduplicate via canonical rotation (rotate so smallest ID is first)
+7. Limit DFS depth to 10 to prevent combinatorial explosion
+
+**Example:**
+```
+review-hook.json (hook-auto) → code-conventions.md (steering-policy) → lint-hook.json (hook-auto) → code-conventions.md
+  Cycle: review-hook → code-conventions → lint-hook → review-hook  →  ALERT (3 nodes)
+```
+
+**Impact:** The agent enters an infinite execution loop, consuming resources without producing useful output.
+
+**How to fix:** Break the circular reference by removing one edge in the cycle — typically by making the hook self-sufficient (adding instructions directly in the prompt) instead of referencing back to a steering that triggers another hook.
+
+---
+
 ## Visual Summary
 
 ```
@@ -483,4 +510,4 @@ security-policies.md (steering-policy)
 
 ---
 
-*Version: 0.2.2 | 21 analysis rules | 207 automated tests*
+*Version: 0.2.2 | 22 analysis rules | 207 automated tests*

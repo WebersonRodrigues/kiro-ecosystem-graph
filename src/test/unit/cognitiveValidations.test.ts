@@ -6,6 +6,7 @@ import {
   computeSteeringsWithoutAccess,
   computeDecisionPath,
   computeSemanticCoherence,
+  detectCircularHookDependencies,
   isHeaderOnTopic,
   tokenizeHeader,
   KEYWORD_SETS,
@@ -810,5 +811,126 @@ describe('CognitiveValidations — computeSemanticCoherence()', function () {
   it('tokenizeHeader splits by non-alphanumeric and lowercases', function () {
     const tokens = tokenizeHeader('Deploy-Pipeline (CI/CD)');
     assert.deepStrictEqual(tokens, ['deploy', 'pipeline', 'ci', 'cd']);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Circular Hook Dependencies (Rule 22)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('CognitiveValidations — detectCircularHookDependencies()', function () {
+  it('detects simple 2-node cycle: hook A → steering B → hook A', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook-a.json', { type: 'hook-auto' }),
+      makeNode('steering-b.md', { type: 'steering-domain' }),
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'hook-a.json', target: 'steering-b.md', type: 'wiki-link' },
+      { source: 'steering-b.md', target: 'hook-a.json', type: 'wiki-link' },
+    ];
+    const result = detectCircularHookDependencies(nodes, edges);
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].cycleLength, 2);
+  });
+
+  it('detects 3+ node cycle: hook A → steering B → hook C → steering D → hook A', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook-a.json', { type: 'hook-auto' }),
+      makeNode('steering-b.md', { type: 'steering-domain' }),
+      makeNode('hook-c.json', { type: 'hook-manual' }),
+      makeNode('steering-d.md', { type: 'steering-flow' }),
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'hook-a.json', target: 'steering-b.md', type: 'wiki-link' },
+      { source: 'steering-b.md', target: 'hook-c.json', type: 'wiki-link' },
+      { source: 'hook-c.json', target: 'steering-d.md', type: 'wiki-link' },
+      { source: 'steering-d.md', target: 'hook-a.json', type: 'wiki-link' },
+    ];
+    const result = detectCircularHookDependencies(nodes, edges);
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].cycleLength, 4);
+  });
+
+  it('acyclic graph returns empty array', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook-a.json', { type: 'hook-auto' }),
+      makeNode('steering-b.md', { type: 'steering-domain' }),
+      makeNode('steering-c.md', { type: 'steering-flow' }),
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'hook-a.json', target: 'steering-b.md', type: 'wiki-link' },
+      { source: 'steering-b.md', target: 'steering-c.md', type: 'wiki-link' },
+    ];
+    const result = detectCircularHookDependencies(nodes, edges);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('cycle only between steerings is NOT reported', function () {
+    const nodes: GraphNode[] = [
+      makeNode('steering-a.md', { type: 'steering-domain' }),
+      makeNode('steering-b.md', { type: 'steering-flow' }),
+      makeNode('steering-c.md', { type: 'steering-tech' }),
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'steering-a.md', target: 'steering-b.md', type: 'wiki-link' },
+      { source: 'steering-b.md', target: 'steering-c.md', type: 'wiki-link' },
+      { source: 'steering-c.md', target: 'steering-a.md', type: 'wiki-link' },
+    ];
+    const result = detectCircularHookDependencies(nodes, edges);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('unresolved nodes (resolved: false) are excluded', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook-a.json', { type: 'hook-auto', resolved: false }),
+      makeNode('steering-b.md', { type: 'steering-domain' }),
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'hook-a.json', target: 'steering-b.md', type: 'wiki-link' },
+      { source: 'steering-b.md', target: 'hook-a.json', type: 'wiki-link' },
+    ];
+    const result = detectCircularHookDependencies(nodes, edges);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('empty graph returns empty array', function () {
+    const result = detectCircularHookDependencies([], []);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('deduplication: same cycle from different entry points reported once', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook-a.json', { type: 'hook-auto' }),
+      makeNode('steering-b.md', { type: 'steering-domain' }),
+      makeNode('hook-c.json', { type: 'hook-manual' }),
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'hook-a.json', target: 'steering-b.md', type: 'wiki-link' },
+      { source: 'steering-b.md', target: 'hook-c.json', type: 'wiki-link' },
+      { source: 'hook-c.json', target: 'hook-a.json', type: 'wiki-link' },
+    ];
+    const result = detectCircularHookDependencies(nodes, edges);
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].cycleLength, 3);
+  });
+
+  it('cycles larger than maxDepth are not reported', function () {
+    // Create a cycle of length 5 but set maxDepth to 3
+    const nodes: GraphNode[] = [
+      makeNode('hook-a.json', { type: 'hook-auto' }),
+      makeNode('s-b.md', { type: 'steering-domain' }),
+      makeNode('s-c.md', { type: 'steering-flow' }),
+      makeNode('s-d.md', { type: 'steering-tech' }),
+      makeNode('s-e.md', { type: 'steering-policy' }),
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'hook-a.json', target: 's-b.md', type: 'wiki-link' },
+      { source: 's-b.md', target: 's-c.md', type: 'wiki-link' },
+      { source: 's-c.md', target: 's-d.md', type: 'wiki-link' },
+      { source: 's-d.md', target: 's-e.md', type: 'wiki-link' },
+      { source: 's-e.md', target: 'hook-a.json', type: 'wiki-link' },
+    ];
+    const result = detectCircularHookDependencies(nodes, edges, 3);
+    assert.strictEqual(result.length, 0);
   });
 });

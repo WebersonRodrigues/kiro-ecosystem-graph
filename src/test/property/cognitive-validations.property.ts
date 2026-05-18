@@ -11,6 +11,7 @@ import {
   computeHookCoverage,
   computeQualityGateLevel,
   computeDmlProtectionLevel,
+  detectCircularHookDependencies,
 } from '../../services/cognitiveValidations';
 import type { GraphNode, GraphEdge } from '../../types';
 
@@ -1796,6 +1797,203 @@ describe('Cognitive Validations — Semantic Coherence (Property)', function () 
             headers.length,
             'off-topic + on-topic must equal total headers',
           );
+        }
+      }),
+      { numRuns: 200 },
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Circular Hook Dependencies (Rule 22)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Cognitive Validations — Circular Hook Dependencies (Property)', function () {
+  this.timeout(30000);
+
+  const hookTypeArb = fc.constantFrom('hook-auto' as NodeType, 'hook-manual' as NodeType);
+  const steeringTypeArb = fc.constantFrom(
+    'steering-domain' as NodeType,
+    'steering-flow' as NodeType,
+    'steering-tech' as NodeType,
+  );
+
+  /**
+   * **Validates: Requirements 2.1**
+   * Every reported cycle contains at least one hook node.
+   */
+  it('every reported cycle contains at least one hook node', function () {
+    // Generate random graphs with hooks and steerings, some with cycles
+    const graphArb = fc.integer({ min: 3, max: 8 }).chain((size) => {
+      const nodeArb = fc.array(
+        fc.tuple(
+          fc.integer({ min: 0, max: size - 1 }),
+          fc.oneof(hookTypeArb, steeringTypeArb),
+        ),
+        { minLength: size, maxLength: size },
+      );
+      const edgeArb = fc.array(
+        fc.tuple(
+          fc.integer({ min: 0, max: size - 1 }),
+          fc.integer({ min: 0, max: size - 1 }),
+        ).filter(([a, b]) => a !== b),
+        { minLength: 1, maxLength: size * 2 },
+      );
+      return fc.tuple(nodeArb, edgeArb).map(([nodeSpecs, edgeSpecs]) => {
+        const nodes = nodeSpecs.map(([idx, type], i) => makeNode(`node-${i}.md`, { type }));
+        const edges: GraphEdge[] = edgeSpecs.map(([a, b]) => ({
+          source: `node-${a}.md`,
+          target: `node-${b}.md`,
+          type: 'wiki-link' as const,
+        }));
+        return { nodes, edges };
+      });
+    });
+
+    fc.assert(
+      fc.property(graphArb, ({ nodes, edges }) => {
+        const cycles = detectCircularHookDependencies(nodes, edges);
+        for (const cycle of cycles) {
+          const hasHook = cycle.nodes.some(
+            (n) => n.type === 'hook-auto' || n.type === 'hook-manual',
+          );
+          assert.ok(hasHook, 'Every cycle must contain at least one hook');
+        }
+      }),
+      { numRuns: 200 },
+    );
+  });
+
+  /**
+   * **Validates: Requirements 1.4**
+   * cycleLength === nodes.length for each reported cycle.
+   */
+  it('cycleLength equals nodes.length for each cycle', function () {
+    const graphArb = fc.integer({ min: 2, max: 6 }).chain((size) => {
+      const nodeArb = fc.array(
+        fc.oneof(hookTypeArb, steeringTypeArb),
+        { minLength: size, maxLength: size },
+      );
+      const edgeArb = fc.array(
+        fc.tuple(
+          fc.integer({ min: 0, max: size - 1 }),
+          fc.integer({ min: 0, max: size - 1 }),
+        ).filter(([a, b]) => a !== b),
+        { minLength: size, maxLength: size * 2 },
+      );
+      return fc.tuple(nodeArb, edgeArb).map(([types, edgeSpecs]) => {
+        const nodes = types.map((type, i) => makeNode(`n-${i}.md`, { type }));
+        const edges: GraphEdge[] = edgeSpecs.map(([a, b]) => ({
+          source: `n-${a}.md`,
+          target: `n-${b}.md`,
+          type: 'wiki-link' as const,
+        }));
+        return { nodes, edges };
+      });
+    });
+
+    fc.assert(
+      fc.property(graphArb, ({ nodes, edges }) => {
+        const cycles = detectCircularHookDependencies(nodes, edges);
+        for (const cycle of cycles) {
+          assert.strictEqual(
+            cycle.cycleLength,
+            cycle.nodes.length,
+            'cycleLength must equal nodes.length',
+          );
+        }
+      }),
+      { numRuns: 200 },
+    );
+  });
+
+  /**
+   * **Validates: Requirements 1.3**
+   * No duplicate cycles (same nodes in cyclic order).
+   */
+  it('no duplicate cycles reported', function () {
+    const graphArb = fc.integer({ min: 3, max: 7 }).chain((size) => {
+      const nodeArb = fc.array(
+        fc.oneof(hookTypeArb, steeringTypeArb),
+        { minLength: size, maxLength: size },
+      );
+      const edgeArb = fc.array(
+        fc.tuple(
+          fc.integer({ min: 0, max: size - 1 }),
+          fc.integer({ min: 0, max: size - 1 }),
+        ).filter(([a, b]) => a !== b),
+        { minLength: size, maxLength: size * 3 },
+      );
+      return fc.tuple(nodeArb, edgeArb).map(([types, edgeSpecs]) => {
+        const nodes = types.map((type, i) => makeNode(`x-${i}.md`, { type }));
+        const edges: GraphEdge[] = edgeSpecs.map(([a, b]) => ({
+          source: `x-${a}.md`,
+          target: `x-${b}.md`,
+          type: 'wiki-link' as const,
+        }));
+        return { nodes, edges };
+      });
+    });
+
+    fc.assert(
+      fc.property(graphArb, ({ nodes, edges }) => {
+        const cycles = detectCircularHookDependencies(nodes, edges);
+        const keys = new Set<string>();
+        for (const cycle of cycles) {
+          const ids = cycle.nodes.map((n) => n.id);
+          let minIdx = 0;
+          for (let i = 1; i < ids.length; i++) {
+            if (ids[i] < ids[minIdx]) { minIdx = i; }
+          }
+          const rotated = [...ids.slice(minIdx), ...ids.slice(0, minIdx)];
+          const key = rotated.join('|||');
+          assert.ok(!keys.has(key), `Duplicate cycle detected: ${key}`);
+          keys.add(key);
+        }
+      }),
+      { numRuns: 200 },
+    );
+  });
+
+  /**
+   * **Validates: Requirements 1.4**
+   * All nodes in reported cycles exist in the input graph.
+   */
+  it('all nodes in cycles exist in the input graph', function () {
+    const graphArb = fc.integer({ min: 2, max: 8 }).chain((size) => {
+      const nodeArb = fc.array(
+        fc.oneof(hookTypeArb, steeringTypeArb),
+        { minLength: size, maxLength: size },
+      );
+      const edgeArb = fc.array(
+        fc.tuple(
+          fc.integer({ min: 0, max: size - 1 }),
+          fc.integer({ min: 0, max: size - 1 }),
+        ).filter(([a, b]) => a !== b),
+        { minLength: 1, maxLength: size * 2 },
+      );
+      return fc.tuple(nodeArb, edgeArb).map(([types, edgeSpecs]) => {
+        const nodes = types.map((type, i) => makeNode(`g-${i}.md`, { type }));
+        const edges: GraphEdge[] = edgeSpecs.map(([a, b]) => ({
+          source: `g-${a}.md`,
+          target: `g-${b}.md`,
+          type: 'wiki-link' as const,
+        }));
+        return { nodes, edges };
+      });
+    });
+
+    fc.assert(
+      fc.property(graphArb, ({ nodes, edges }) => {
+        const nodeIds = new Set(nodes.map((n) => n.id));
+        const cycles = detectCircularHookDependencies(nodes, edges);
+        for (const cycle of cycles) {
+          for (const cycleNode of cycle.nodes) {
+            assert.ok(
+              nodeIds.has(cycleNode.id),
+              `Cycle node ${cycleNode.id} must exist in input graph`,
+            );
+          }
         }
       }),
       { numRuns: 200 },

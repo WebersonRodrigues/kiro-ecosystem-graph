@@ -43,6 +43,7 @@ export function generateCognitiveReport(
   appendStaleContent(lines, data);
   appendSuggestedConnections(lines, data);
   appendSemanticCoherence(lines, data);
+  appendCircularHookDependencies(lines, data);
   appendRecommendations(lines, data);
   appendInstructionsForAI(lines, data);
 
@@ -81,6 +82,9 @@ function appendSummaryTable(lines: string[], data: CognitiveAnalysisResult): voi
   }
   if (data.semanticCoherence && data.semanticCoherence.length > 0) {
     lines.push(`| Semantic Coherence | ${data.semanticCoherence.length} |`);
+  }
+  if (data.circularHookDependencies && data.circularHookDependencies.length > 0) {
+    lines.push(`| Circular Hook Dependencies | ${data.circularHookDependencies.length} |`);
   }
   if (data.healthScore) {
     lines.push(`| **Health Score** | **${data.healthScore.score}/100** |`);
@@ -446,6 +450,22 @@ function appendSemanticCoherence(lines: string[], data: CognitiveAnalysisResult)
   lines.push('');
 }
 
+function appendCircularHookDependencies(lines: string[], data: CognitiveAnalysisResult): void {
+  const items = data.circularHookDependencies || [];
+  if (items.length === 0) { return; }
+  lines.push('## Circular Hook Dependencies');
+  lines.push('');
+  lines.push('Cycles between hooks and steerings that could cause infinite agent execution loops.');
+  lines.push('');
+  lines.push('| Cycle Length | Nodes | Tip |');
+  lines.push('|------------|-------|-----|');
+  for (const cycle of items) {
+    const nodeLabels = cycle.nodes.map((n) => `${n.label} [${n.type}]`).join(' → ');
+    lines.push(`| ${cycle.cycleLength} | ${nodeLabels} | Break the circular reference by removing one edge in this cycle |`);
+  }
+  lines.push('');
+}
+
 function appendRecommendations(lines: string[], data: CognitiveAnalysisResult): void {
   if (data.sugestoes.length === 0) { return; }
   lines.push('## Recommendations');
@@ -523,6 +543,9 @@ function appendInstructionsForAI(lines: string[], data: CognitiveAnalysisResult)
   }
   if ((data.semanticCoherence || []).length > 0) {
     lines.push(`${step++}. For each Semantic Coherence alert, move off-topic content to a steering of the appropriate NodeType.`);
+  }
+  if ((data.circularHookDependencies || []).length > 0) {
+    lines.push(`${step++}. For each Circular Hook Dependency, break the circular reference by removing or redirecting one edge in the cycle.`);
   }
 
   lines.push('');

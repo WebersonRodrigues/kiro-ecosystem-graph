@@ -400,3 +400,61 @@ describe('MarkdownReportGenerator', function () {
       assert.ok(report.includes('| Semantic Coherence | 2 |'));
     });
   });
+
+  describe('Circular Hook Dependencies section', function () {
+    it('generates section with valid data', function () {
+      const data = createMinimalResult();
+      data.circularHookDependencies = [
+        {
+          nodes: [
+            { id: 'hook-a.json', label: 'hook-a', type: 'hook-auto' },
+            { id: 'steering-b.md', label: 'steering-b', type: 'steering-domain' },
+          ],
+          cycleLength: 2,
+        },
+      ];
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('## Circular Hook Dependencies'));
+      assert.ok(report.includes('| 2 |'));
+      assert.ok(report.includes('hook-a [hook-auto]'));
+      assert.ok(report.includes('steering-b [steering-domain]'));
+      assert.ok(report.includes('Break the circular reference'));
+    });
+
+    it('omits section when array is empty or undefined', function () {
+      const data = createMinimalResult();
+      data.circularHookDependencies = [];
+
+      const report = generateCognitiveReport(data);
+      assert.ok(!report.includes('## Circular Hook Dependencies'));
+
+      const data2 = createMinimalResult();
+      const report2 = generateCognitiveReport(data2);
+      assert.ok(!report2.includes('## Circular Hook Dependencies'));
+    });
+
+    it('includes count in Summary table', function () {
+      const data = createMinimalResult();
+      data.circularHookDependencies = [
+        {
+          nodes: [
+            { id: 'h.json', label: 'h', type: 'hook-auto' },
+            { id: 's.md', label: 's', type: 'steering-flow' },
+          ],
+          cycleLength: 2,
+        },
+        {
+          nodes: [
+            { id: 'h2.json', label: 'h2', type: 'hook-manual' },
+            { id: 's2.md', label: 's2', type: 'steering-tech' },
+            { id: 'h3.json', label: 'h3', type: 'hook-auto' },
+          ],
+          cycleLength: 3,
+        },
+      ];
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('| Circular Hook Dependencies | 2 |'));
+    });
+  });

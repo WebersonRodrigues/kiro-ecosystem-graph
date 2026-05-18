@@ -22,6 +22,7 @@ import type {
   StaleContentAlert,
   LinkSuggestion,
   SemanticCoherenceAlert,
+  CircularHookDependency,
 } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1193,4 +1194,169 @@ export function isHeaderOnTopic(header: string, keywordSet: string[]): boolean {
  */
 export function tokenizeHeader(header: string): string[] {
   return header.toLowerCase().split(/[^a-záàâãéèêíïóôõöúçñü]+/).filter((t) => t.length > 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Circular Hook Dependencies (Rule 22)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** DFS node coloring for cycle detection */
+const enum Color {
+  WHITE = 0,
+  GRAY = 1,
+  BLACK = 2,
+}
+
+/**
+ * Filters nodes to only hooks and steerings with resolved !== false.
+ */
+function filterRelevantNodes(nodes: GraphNode[]): GraphNode[] {
+  return nodes.filter((n) => {
+    if (n.resolved === false) { return false; }
+    return isHookNode(n) || isSteeringType(n.type);
+  });
+}
+
+function isHookNode(node: GraphNode): boolean {
+  return node.type === 'hook-auto' || node.type === 'hook-manual';
+}
+
+function isSteeringType(type: NodeType | string): boolean {
+  return typeof type === 'string' && type.startsWith('steering-');
+}
+
+/**
+ * Builds a directed adjacency list from edges, restricted to the given node set.
+ */
+function buildFilteredAdjacency(
+  nodeIds: Set<string>,
+  edges: GraphEdge[],
+): Map<string, string[]> {
+  const adj = new Map<string, string[]>();
+  for (const id of nodeIds) { adj.set(id, []); }
+  for (const edge of edges) {
+    if (nodeIds.has(edge.source) && nodeIds.has(edge.target)) {
+      adj.get(edge.source)!.push(edge.target);
+    }
+  }
+  return adj;
+}
+
+/**
+ * Checks whether a cycle contains at least one hook node.
+ */
+function cycleContainsHook(
+  cycle: string[],
+  nodeMap: Map<string, GraphNode>,
+): boolean {
+  return cycle.some((id) => {
+    const node = nodeMap.get(id);
+    return node !== undefined && isHookNode(node);
+  });
+}
+
+/**
+ * Computes the canonical form of a cycle for deduplication.
+ * Rotates so the smallest ID is first, then joins with '|||'.
+ */
+function canonicalizeCycle(cycle: string[]): string {
+  if (cycle.length === 0) { return ''; }
+  let minIdx = 0;
+  for (let i = 1; i < cycle.length; i++) {
+    if (cycle[i] < cycle[minIdx]) { minIdx = i; }
+  }
+  const rotated = [...cycle.slice(minIdx), ...cycle.slice(0, minIdx)];
+  return rotated.join('|||');
+}
+
+/**
+ * DFS with coloring to detect back-edges and extract cycles.
+ */
+function dfsDetectCycles(
+  startNode: string,
+  adjacency: Map<string, string[]>,
+  color: Map<string, Color>,
+  path: string[],
+  cycles: string[][],
+  maxDepth: number,
+): void {
+  if (path.length > maxDepth) { return; }
+  color.set(startNode, Color.GRAY);
+  path.push(startNode);
+
+  for (const neighbor of adjacency.get(startNode) || []) {
+    const neighborColor = color.get(neighbor) ?? Color.WHITE;
+    if (neighborColor === Color.GRAY) {
+      const cycleStart = path.indexOf(neighbor);
+      if (cycleStart !== -1) {
+        cycles.push(path.slice(cycleStart));
+      }
+    } else if (neighborColor === Color.WHITE) {
+      dfsDetectCycles(neighbor, adjacency, color, path, cycles, maxDepth);
+    }
+  }
+
+  path.pop();
+  color.set(startNode, Color.BLACK);
+}
+
+/**
+ * Detects circular dependencies between hooks and steerings.
+ * Uses DFS with coloring (WHITE/GRAY/BLACK) to find back-edges indicating cycles.
+ * Only reports cycles containing at least one hook node.
+ *
+ * @param nodes - All graph nodes
+ * @param edges - All graph edges
+ * @param maxDepth - Maximum DFS depth to prevent combinatorial explosion (default 10)
+ * @returns Array of detected circular hook dependencies
+ */
+export function detectCircularHookDependencies(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  maxDepth: number = 10,
+): CircularHookDependency[] {
+  const relevant = filterRelevantNodes(nodes);
+  const nodeIds = new Set(relevant.map((n) => n.id));
+  const nodeMap = new Map(relevant.map((n) => [n.id, n]));
+  const adjacency = buildFilteredAdjacency(nodeIds, edges);
+
+  const color = new Map<string, Color>();
+  for (const id of nodeIds) { color.set(id, Color.WHITE); }
+
+  const rawCycles: string[][] = [];
+  for (const id of nodeIds) {
+    if (color.get(id) === Color.WHITE) {
+      dfsDetectCycles(id, adjacency, color, [], rawCycles, maxDepth);
+    }
+  }
+
+  return deduplicateAndFilter(rawCycles, nodeMap);
+}
+
+/**
+ * Filters cycles to those containing a hook and deduplicates via canonical rotation.
+ */
+function deduplicateAndFilter(
+  rawCycles: string[][],
+  nodeMap: Map<string, GraphNode>,
+): CircularHookDependency[] {
+  const seen = new Set<string>();
+  const results: CircularHookDependency[] = [];
+
+  for (const cycle of rawCycles) {
+    if (!cycleContainsHook(cycle, nodeMap)) { continue; }
+
+    const key = canonicalizeCycle(cycle);
+    if (seen.has(key)) { continue; }
+    seen.add(key);
+
+    const cycleNodes = cycle.map((id) => {
+      const node = nodeMap.get(id);
+      return { id, label: node?.label || id, type: node?.type || 'unknown' };
+    });
+
+    results.push({ nodes: cycleNodes, cycleLength: cycle.length });
+  }
+
+  return results;
 }

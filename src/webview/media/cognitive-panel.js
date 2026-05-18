@@ -646,6 +646,99 @@ var CognitivePanel = (function () {
     return alerts;
   }
 
+  // ─── Circular Hook Dependencies (Rule 22) ─────────────────────────────
+
+  /**
+   * Detect circular dependencies between hooks and steerings using DFS with coloring.
+   * Only reports cycles containing at least one hook node.
+   * @param {any[]} nodes
+   * @param {any[]} links
+   * @param {number} [maxDepth=10]
+   * @returns {{ nodes: {id:string, label:string, type:string}[], cycleLength: number }[]}
+   */
+  function detectCircularHookDependenciesWebview(nodes, links, maxDepth) {
+    if (!maxDepth) { maxDepth = 10; }
+
+    // Filter to hooks and steerings with resolved !== false
+    var relevant = nodes.filter(function(n) {
+      if (n.resolved === false) { return false; }
+      return isHookNodeWebview(n) || (n.type && n.type.indexOf('steering-') === 0);
+    });
+
+    var nodeIds = {};
+    var nodeMap = {};
+    relevant.forEach(function(n) { nodeIds[n.id] = true; nodeMap[n.id] = n; });
+
+    // Build adjacency list
+    var adj = {};
+    relevant.forEach(function(n) { adj[n.id] = []; });
+    links.forEach(function(link) {
+      var s = typeof link.source === 'object' ? link.source.id : link.source;
+      var t = typeof link.target === 'object' ? link.target.id : link.target;
+      if (nodeIds[s] && nodeIds[t]) { adj[s].push(t); }
+    });
+
+    // DFS with coloring
+    var WHITE = 0, GRAY = 1, BLACK = 2;
+    var color = {};
+    relevant.forEach(function(n) { color[n.id] = WHITE; });
+    var rawCycles = [];
+
+    function dfs(node, path) {
+      if (path.length > maxDepth) { return; }
+      color[node] = GRAY;
+      path.push(node);
+      var neighbors = adj[node] || [];
+      for (var i = 0; i < neighbors.length; i++) {
+        var neighbor = neighbors[i];
+        if (color[neighbor] === GRAY) {
+          var cycleStart = path.indexOf(neighbor);
+          if (cycleStart !== -1) { rawCycles.push(path.slice(cycleStart)); }
+        } else if (color[neighbor] === WHITE) {
+          dfs(neighbor, path);
+        }
+      }
+      path.pop();
+      color[node] = BLACK;
+    }
+
+    relevant.forEach(function(n) {
+      if (color[n.id] === WHITE) { dfs(n.id, []); }
+    });
+
+    // Filter and deduplicate
+    var seen = {};
+    var results = [];
+    for (var i = 0; i < rawCycles.length; i++) {
+      var cycle = rawCycles[i];
+      var hasHook = cycle.some(function(id) { return nodeMap[id] && isHookNodeWebview(nodeMap[id]); });
+      if (!hasHook) { continue; }
+      var key = canonicalizeCycleWebview(cycle);
+      if (seen[key]) { continue; }
+      seen[key] = true;
+      var cycleNodes = cycle.map(function(id) {
+        var n = nodeMap[id];
+        return { id: id, label: n ? n.label : id, type: n ? n.type : 'unknown' };
+      });
+      results.push({ nodes: cycleNodes, cycleLength: cycle.length });
+    }
+    return results;
+  }
+
+  function isHookNodeWebview(node) {
+    return node.type === 'hook-auto' || node.type === 'hook-manual';
+  }
+
+  function canonicalizeCycleWebview(cycle) {
+    if (cycle.length === 0) { return ''; }
+    var minIdx = 0;
+    for (var i = 1; i < cycle.length; i++) {
+      if (cycle[i] < cycle[minIdx]) { minIdx = i; }
+    }
+    var rotated = cycle.slice(minIdx).concat(cycle.slice(0, minIdx));
+    return rotated.join('|||');
+  }
+
   // ─── Structure Validations ─────────────────────────────────────────────
 
   /**
@@ -1289,6 +1382,9 @@ var CognitivePanel = (function () {
     // 14. Semantic Coherence (Rule 21)
     var semanticCoherence = computeSemanticCoherenceWebview(data.nodes);
 
+    // 15. Circular Hook Dependencies (Rule 22)
+    var circularHookDependencies = detectCircularHookDependenciesWebview(data.nodes, data.links);
+
     // 11. Cross-Workspace Topology: group external nodes by workspace
     var crossWorkspaceTopology = [];
     var workspaceGroups = {};
@@ -1357,6 +1453,9 @@ var CognitivePanel = (function () {
       if (dmlProtection.missing.needsRiskIntegration) { dmlMissing.push('hook\u2192risk-steering integration'); }
       sugestoes.push('DML Protection at level ' + dmlProtection.maturityLevel + '/2. Missing: ' + dmlMissing.join(', ') + '.');
     }
+    if (circularHookDependencies.length > 0) {
+      sugestoes.push(circularHookDependencies.length + ' circular hook dependency cycle(s) detected — hooks and steerings forming loops that could cause infinite agent execution. Break the circular references.');
+    }
 
     return {
       steeringsSoltos: steeringsSoltos,
@@ -1385,6 +1484,7 @@ var CognitivePanel = (function () {
       staleContent: staleContent,
       suggestedConnections: suggestedConnections,
       semanticCoherence: semanticCoherence,
+      circularHookDependencies: circularHookDependencies,
       healthScore: computeHealthScore({
         steeringsSoltos: steeringsSoltos,
         vinculosFrageis: vinculosFrageis,
@@ -1968,6 +2068,23 @@ var CognitivePanel = (function () {
       }
     }
     html += '</div>';
+
+    // Circular Hook Dependencies (Rule 22)
+    if (analysis.circularHookDependencies && analysis.circularHookDependencies.length > 0) {
+      html += '<div style="margin-bottom:6px;"><span style="color:#E65100;font-weight:bold;">\u26A0\uFE0F Circular Hook Dependencies</span>';
+      html += ' <span style="color:#E65100;">' + analysis.circularHookDependencies.length + '</span>';
+      analysis.circularHookDependencies.slice(0, 5).forEach(function(cycle) {
+        var nodeLabels = cycle.nodes.map(function(n) {
+          var typeTag = n.type.indexOf('hook') !== -1 ? 'hook' : 'steering';
+          return escapeHtml(n.label) + ' [' + typeTag + ']';
+        }).join(' \u2192 ');
+        html += '<div style="padding-left:6px;color:#aaa;font-size:9px;">' + nodeLabels + '</div>';
+      });
+      if (analysis.circularHookDependencies.length > 5) {
+        html += '<div style="padding-left:6px;color:#666;font-size:9px;">...and ' + (analysis.circularHookDependencies.length - 5) + ' more</div>';
+      }
+      html += '</div>';
+    }
 
     // Suggestions
     if (analysis.sugestoes.length > 0) {

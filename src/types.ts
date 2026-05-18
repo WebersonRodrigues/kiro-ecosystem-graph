@@ -396,6 +396,9 @@ export interface CognitiveAnalysisResult {
 
   /** Steerings with section headers mismatched to their NodeType domain (Rule 21) */
   semanticCoherence?: SemanticCoherenceAlert[];
+
+  /** Circular dependencies between hooks and steerings (Rule 22) */
+  circularHookDependencies?: CircularHookDependency[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -450,6 +453,14 @@ export interface SemanticCoherenceAlert {
   coherencePercent: number;
   /** Headers that did not match the expected keyword set */
   offTopicHeaders: string[];
+}
+
+/** A detected circular dependency involving hooks and steerings */
+export interface CircularHookDependency {
+  /** Ordered list of nodes in the cycle */
+  nodes: { id: string; label: string; type: string }[];
+  /** Number of nodes in the cycle */
+  cycleLength: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

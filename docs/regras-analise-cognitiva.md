@@ -445,6 +445,33 @@ security-policies.md (steering-policy)
 
 ---
 
+### 22. Circular Hook Dependencies (Detecção de Loops Infinitos)
+
+**O que verifica:** Ciclos no grafo direcionado onde o caminho inclui pelo menos um nó hook. Um ciclo ocorre quando hook A referencia steering X, steering X referencia hook B, hook B referencia steering Y, e steering Y referencia hook A (ou padrões similares).
+
+**Por que importa:** Esses ciclos podem causar loops infinitos de execução do agente — o hook dispara, carrega o steering, que referencia outro hook, que dispara novamente, criando uma cadeia sem fim. Diferente de Dead Loops (Regra 9) que detecta SCCs isolados puramente entre steerings, esta regra detecta QUALQUER ciclo que inclua pelo menos um hook.
+
+**Algoritmo:**
+1. Filtrar nós para hooks e steerings com `resolved !== false`
+2. Construir lista de adjacência direcionada a partir das edges entre nós filtrados
+3. DFS com coloração (WHITE/GRAY/BLACK) e rastreamento de caminho
+4. Quando uma back-edge é encontrada (vizinho é GRAY), extrair o ciclo do caminho
+5. Manter apenas ciclos contendo pelo menos um hook (`hook-auto` ou `hook-manual`)
+6. Deduplicar via rotação canônica (rotacionar para que o menor ID seja primeiro)
+7. Limitar profundidade do DFS a 10 para evitar explosão combinatória
+
+**Exemplo:**
+```
+review-hook.json (hook-auto) → code-conventions.md (steering-policy) → lint-hook.json (hook-auto) → code-conventions.md
+  Ciclo: review-hook → code-conventions → lint-hook → review-hook  →  ALERTA (3 nós)
+```
+
+**Impacto:** O agente entra em um loop infinito de execução, consumindo recursos sem produzir resultado útil.
+
+**Como resolver:** Quebre a referência circular removendo uma edge do ciclo — tipicamente tornando o hook auto-suficiente (adicionando instruções diretamente no prompt) ao invés de referenciar de volta um steering que dispara outro hook.
+
+---
+
 ## Resumo Visual
 
 ```
@@ -483,4 +510,4 @@ security-policies.md (steering-policy)
 
 ---
 
-*Versão: 0.2.2 | 21 regras de análise | 207 testes automatizados*
+*Versão: 0.2.2 | 22 regras de análise | 207 testes automatizados*
