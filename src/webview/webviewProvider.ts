@@ -6,6 +6,7 @@ import { AnnotationService } from '../services/annotationService';
 import { SnapshotService } from '../services/snapshotService';
 import { generateCognitiveReport } from '../services/markdownReportGenerator';
 import { generateTargetedPrompt, generateConsolidatedPrompt } from '../services/fixPromptGenerator';
+import { getTemplate } from '../services/onboardingTemplates';
 
 /**
  * Webview provider for the Ecosystem Graph panel.
@@ -122,6 +123,9 @@ export class EcosystemGraphProvider implements vscode.WebviewViewProvider {
         break;
       case 'fixAllCategory':
         this.handleFixAllCategory(message.category, message.issues);
+        break;
+      case 'createFromTemplate':
+        this.handleCreateFromTemplate(message.templateKey, message.fileName, message.targetDir);
         break;
     }
   }
@@ -271,6 +275,39 @@ export class EcosystemGraphProvider implements vscode.WebviewViewProvider {
       await vscode.commands.executeCommand('workbench.action.chat.open');
     } catch {
       // Chat command unavailable — user pastes manually
+    }
+  }
+
+  /**
+   * Handles creating a file from an onboarding template.
+   * Does not overwrite existing files — shows an informational message instead.
+   */
+  private async handleCreateFromTemplate(
+    templateKey: string,
+    fileName: string,
+    targetDir: string,
+  ): Promise<void> {
+    const template = getTemplate(templateKey);
+    if (!template) {
+      vscode.window.showWarningMessage(`Template not found: ${templateKey}`);
+      return;
+    }
+
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+      vscode.window.showWarningMessage('No workspace folder open.');
+      return;
+    }
+
+    const fileUri = vscode.Uri.joinPath(workspaceFolder.uri, targetDir, fileName);
+
+    try {
+      await vscode.workspace.fs.stat(fileUri);
+      vscode.window.showInformationMessage(`File already exists: ${targetDir}/${fileName}`);
+    } catch {
+      await vscode.workspace.fs.writeFile(fileUri, Buffer.from(template, 'utf-8'));
+      const document = await vscode.workspace.openTextDocument(fileUri);
+      await vscode.window.showTextDocument(document);
     }
   }
 

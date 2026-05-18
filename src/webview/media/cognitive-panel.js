@@ -1590,6 +1590,209 @@ var CognitivePanel = (function () {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Ecosystem Maturity — Phase Detection (Webview)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  var PHASE_NAMES = {
+    1: 'Foundation',
+    2: 'Domain Knowledge',
+    3: 'Flows & Security',
+    4: 'Automation',
+    5: 'Evolution',
+  };
+
+  /**
+   * Detect ecosystem phase from graph data and analysis result.
+   * @param {{ nodes: any[], links: any[] }} data
+   * @param {object} analysis
+   * @returns {{ phase: number, phaseName: string, progressPercent: number, criteriaMet: string[], criteriaRemaining: string[] }}
+   */
+  function detectPhaseWebview(data, analysis) {
+    if (!data || !data.nodes) {
+      return { phase: 1, phaseName: 'Foundation', progressPercent: 0, criteriaMet: [], criteriaRemaining: ['project-overview', 'code-conventions', 'domain-steering'] };
+    }
+
+    var steerings = data.nodes.filter(function(n) { return n.type && n.type.indexOf('steering-') === 0; });
+    var hooks = data.nodes.filter(function(n) { return n.type === 'hook-auto' || n.type === 'hook-manual'; });
+    var hasFlowOrPolicy = steerings.some(function(n) { return n.type === 'steering-flow' || n.type === 'steering-policy'; });
+    var hookEventCount = (analysis && analysis.hookCoverageMap) ? analysis.hookCoverageMap.covered.length : 0;
+    var qualityLevel = (analysis && analysis.qualityGate) ? analysis.qualityGate.maturityLevel : 0;
+    var dmlLevel = (analysis && analysis.dmlProtection) ? analysis.dmlProtection.maturityLevel : 0;
+
+    var phase = 1;
+    if (hookEventCount >= 5 && qualityLevel === 2 && dmlLevel >= 1) {
+      phase = 5;
+    } else if (hooks.length >= 3 && qualityLevel >= 1) {
+      phase = 4;
+    } else if (hasFlowOrPolicy && hooks.length >= 1) {
+      phase = 3;
+    } else if (steerings.length > 2) {
+      phase = 2;
+    }
+
+    var criteria = computeCriteriaWebview(phase, steerings, hooks, analysis);
+    var total = criteria.met.length + criteria.remaining.length;
+    var progress = total === 0 ? 100 : Math.round((criteria.met.length / total) * 100);
+
+    return {
+      phase: phase,
+      phaseName: PHASE_NAMES[phase],
+      progressPercent: progress,
+      criteriaMet: criteria.met,
+      criteriaRemaining: criteria.remaining,
+    };
+  }
+
+  /**
+   * Compute criteria met/remaining for a given phase.
+   */
+  function computeCriteriaWebview(phase, steerings, hooks, analysis) {
+    var met = [];
+    var remaining = [];
+
+    switch (phase) {
+    case 1: {
+      var hasOverview = steerings.some(function(n) { return n.label.toLowerCase().indexOf('project-overview') !== -1 || n.label.toLowerCase().indexOf('project overview') !== -1; });
+      var hasConventions = steerings.some(function(n) { return n.label.toLowerCase().indexOf('code-conventions') !== -1 || n.label.toLowerCase().indexOf('code conventions') !== -1; });
+      var hasDomain = steerings.some(function(n) { return n.type === 'steering-domain' || n.type === 'steering-tech'; });
+      hasOverview ? met.push('project-overview') : remaining.push('project-overview');
+      hasConventions ? met.push('code-conventions') : remaining.push('code-conventions');
+      hasDomain ? met.push('domain-steering') : remaining.push('domain-steering');
+      break;
+    }
+    case 2: {
+      var domainTech = steerings.filter(function(n) { return n.type === 'steering-domain' || n.type === 'steering-tech'; });
+      domainTech.length >= 3 ? met.push('3-domain-steerings') : remaining.push('3-domain-steerings');
+      steerings.some(function(n) { return n.type === 'steering-policy'; }) ? met.push('security-policy') : remaining.push('security-policy');
+      steerings.some(function(n) { return n.type === 'steering-flow'; }) ? met.push('flow-steering') : remaining.push('flow-steering');
+      break;
+    }
+    case 3: {
+      steerings.some(function(n) { return n.type === 'steering-flow'; }) ? met.push('flow-steering') : remaining.push('flow-steering');
+      steerings.some(function(n) { return n.type === 'steering-policy'; }) ? met.push('security-policy') : remaining.push('security-policy');
+      hooks.length >= 1 ? met.push('first-hook') : remaining.push('first-hook');
+      hooks.length >= 3 ? met.push('3-hooks') : remaining.push('3-hooks');
+      break;
+    }
+    case 4: {
+      var ql = (analysis && analysis.qualityGate) ? analysis.qualityGate.maturityLevel : 0;
+      var hec = (analysis && analysis.hookCoverageMap) ? analysis.hookCoverageMap.covered.length : 0;
+      hooks.length >= 3 ? met.push('3-hooks') : remaining.push('3-hooks');
+      ql >= 1 ? met.push('quality-gate-partial') : remaining.push('quality-gate-partial');
+      hec >= 5 ? met.push('hook-coverage-5') : remaining.push('hook-coverage-5');
+      ql === 2 ? met.push('quality-gate-complete') : remaining.push('quality-gate-complete');
+      break;
+    }
+    case 5: {
+      var hec5 = (analysis && analysis.hookCoverageMap) ? analysis.hookCoverageMap.covered.length : 0;
+      var ql5 = (analysis && analysis.qualityGate) ? analysis.qualityGate.maturityLevel : 0;
+      var dml5 = (analysis && analysis.dmlProtection) ? analysis.dmlProtection.maturityLevel : 0;
+      hec5 >= 5 ? met.push('hook-coverage-5') : remaining.push('hook-coverage-5');
+      ql5 === 2 ? met.push('quality-gate-complete') : remaining.push('quality-gate-complete');
+      dml5 >= 1 ? met.push('dml-protection') : remaining.push('dml-protection');
+      hec5 >= 8 ? met.push('hook-coverage-8') : remaining.push('hook-coverage-8');
+      break;
+    }
+    }
+
+    return { met: met, remaining: remaining };
+  }
+
+  /**
+   * Get next step suggestion based on remaining criteria.
+   */
+  function getNextStepWebview(phaseResult) {
+    if (phaseResult.criteriaRemaining.length === 0) { return null; }
+
+    var suggestions = [
+      { criteria: 'project-overview', fileName: 'project-overview.md', fileType: 'steering', description: 'Describe your project, stack, and conventions', templateKey: 'project-overview', targetDir: '.kiro/steering' },
+      { criteria: 'code-conventions', fileName: 'code-conventions.md', fileType: 'steering', description: 'Define coding conventions and formatting rules', templateKey: 'domain-knowledge', targetDir: '.kiro/steering' },
+      { criteria: 'domain-steering', fileName: 'domain-knowledge.md', fileType: 'steering', description: 'Document domain rules and business logic', templateKey: 'domain-knowledge', targetDir: '.kiro/steering' },
+      { criteria: '3-domain-steerings', fileName: 'domain-knowledge.md', fileType: 'steering', description: 'Add more domain/tech steerings (need 3+)', templateKey: 'domain-knowledge', targetDir: '.kiro/steering' },
+      { criteria: 'security-policy', fileName: 'security-policy.md', fileType: 'steering', description: 'Define security rules and access policies', templateKey: 'security-policy', targetDir: '.kiro/steering' },
+      { criteria: 'flow-steering', fileName: 'flow-steering.md', fileType: 'steering', description: 'Document workflow steps and process flows', templateKey: 'flow-steering', targetDir: '.kiro/steering' },
+      { criteria: 'first-hook', fileName: 'pre-tool-use.json', fileType: 'hook', description: 'Add a preToolUse hook for automated validation', templateKey: 'pre-tool-use-hook', targetDir: '.kiro/hooks' },
+      { criteria: '3-hooks', fileName: 'post-task-execution.json', fileType: 'hook', description: 'Add more hooks covering different events', templateKey: 'post-task-hook', targetDir: '.kiro/hooks' },
+      { criteria: 'quality-gate-partial', fileName: 'pre-tool-use.json', fileType: 'hook', description: 'Add a quality gate hook', templateKey: 'pre-tool-use-hook', targetDir: '.kiro/hooks' },
+      { criteria: 'hook-coverage-5', fileName: 'post-task-execution.json', fileType: 'hook', description: 'Increase hook coverage to 5+ IDE events', templateKey: 'post-task-hook', targetDir: '.kiro/hooks' },
+      { criteria: 'quality-gate-complete', fileName: 'post-task-execution.json', fileType: 'hook', description: 'Complete quality gate (post-task review)', templateKey: 'post-task-hook', targetDir: '.kiro/hooks' },
+      { criteria: 'dml-protection', fileName: 'pre-tool-use.json', fileType: 'hook', description: 'Add DML protection hook', templateKey: 'pre-tool-use-hook', targetDir: '.kiro/hooks' },
+      { criteria: 'hook-coverage-8', fileName: 'post-task-execution.json', fileType: 'hook', description: 'Increase hook coverage to 8+ IDE events', templateKey: 'post-task-hook', targetDir: '.kiro/hooks' },
+    ];
+
+    for (var i = 0; i < suggestions.length; i++) {
+      if (phaseResult.criteriaRemaining.indexOf(suggestions[i].criteria) !== -1) {
+        return suggestions[i];
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Render the Ecosystem Maturity onboarding section.
+   * @param {{ nodes: any[], links: any[] }} data
+   * @param {object} analysis
+   * @returns {string} HTML string
+   */
+  function renderOnboardingSection(data, analysis) {
+    var phaseResult = detectPhaseWebview(data, analysis);
+    var nextStep = getNextStepWebview(phaseResult);
+
+    // Check collapsed state from localStorage
+    var collapsed = false;
+    try { collapsed = localStorage.getItem('onboarding-collapsed') === 'true'; } catch (e) { /* ignore */ }
+
+    var sectionStyle = collapsed ? 'display:none;' : '';
+    var toggleIcon = collapsed ? '\u25B6' : '\u25BC';
+
+    var html = '<div style="margin-bottom:8px;border-bottom:1px solid #333;padding-bottom:8px;">';
+    html += '<div id="onboarding-header" style="display:flex;align-items:center;cursor:pointer;margin-bottom:4px;">';
+    html += '<span id="onboarding-toggle-icon" style="font-size:8px;margin-right:4px;color:#888;">' + toggleIcon + '</span>';
+    html += '<span style="font-size:11px;font-weight:bold;color:#4A9EFF;">Ecosystem Maturity</span>';
+    html += '</div>';
+
+    html += '<div id="onboarding-body" style="' + sectionStyle + '">';
+
+    // Phase steps indicator
+    html += '<div style="display:flex;gap:2px;margin-bottom:6px;">';
+    for (var p = 1; p <= 5; p++) {
+      var isActive = p === phaseResult.phase;
+      var isPast = p < phaseResult.phase;
+      var dotColor = isActive ? '#4A9EFF' : isPast ? '#4CAF50' : '#444';
+      var dotBorder = isActive ? '2px solid #4A9EFF' : '1px solid ' + dotColor;
+      html += '<div style="flex:1;text-align:center;">';
+      html += '<div style="width:12px;height:12px;border-radius:50%;background:' + dotColor + ';border:' + dotBorder + ';margin:0 auto;"></div>';
+      html += '<div style="font-size:7px;color:' + (isActive ? '#4A9EFF' : '#666') + ';margin-top:2px;">' + p + '</div>';
+      html += '</div>';
+    }
+    html += '</div>';
+
+    // Phase name and progress
+    html += '<div style="font-size:10px;color:#fff;margin-bottom:4px;">Phase ' + phaseResult.phase + ': ' + escapeHtml(phaseResult.phaseName) + '</div>';
+
+    // Progress bar
+    html += '<div style="background:#333;border-radius:3px;height:6px;margin-bottom:6px;overflow:hidden;">';
+    html += '<div style="background:#4A9EFF;height:100%;width:' + phaseResult.progressPercent + '%;border-radius:3px;transition:width 0.3s;"></div>';
+    html += '</div>';
+    html += '<div style="font-size:8px;color:#888;margin-bottom:6px;">' + phaseResult.progressPercent + '% complete</div>';
+
+    // Next step suggestion or completion message
+    if (!nextStep) {
+      html += '<div style="font-size:9px;color:#4CAF50;font-weight:bold;">\u2705 Ecosystem complete! Focus on maintenance and evolution.</div>';
+    } else {
+      html += '<div style="font-size:9px;color:#ccc;margin-bottom:4px;">';
+      html += '<span style="color:#FF9800;">Next:</span> ' + escapeHtml(nextStep.description);
+      html += '</div>';
+      html += '<button id="onboarding-create-btn" data-template="' + escapeAttr(nextStep.templateKey) + '" data-filename="' + escapeAttr(nextStep.fileName) + '" data-targetdir="' + escapeAttr(nextStep.targetDir) + '" style="background:#2a2a2a;color:#4A9EFF;border:1px solid #4A9EFF;border-radius:3px;font-size:9px;padding:3px 8px;cursor:pointer;width:100%;">Create from Template</button>';
+    }
+
+    html += '</div>'; // onboarding-body
+    html += '</div>'; // outer container
+
+    return html;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Panel Rendering
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -1750,8 +1953,9 @@ var CognitivePanel = (function () {
    * Render the analysis results into the panel.
    * @param {object} analysis
    * @param {Array} statsHistoryData - Optional stats history for trend calculation
+   * @param {{ nodes: any[], links: any[] }} graphData - Raw graph data for onboarding section
    */
-  function renderPanel(analysis, statsHistoryData) {
+  function renderPanel(analysis, statsHistoryData, graphData) {
     var content = document.getElementById('cognitive-content');
     if (!content) { return; }
 
@@ -1773,6 +1977,9 @@ var CognitivePanel = (function () {
     renderHeaderScore(analysis, statsHistoryData);
 
     var html = '';
+
+    // ─── Ecosystem Maturity (Onboarding Section) ───
+    html += renderOnboardingSection(graphData, analysis);
 
     // Orphan Steerings
     html += '<div style="margin-bottom:6px;"><span data-fix-header="orphan-steerings" style="color:#FF9800;font-weight:bold;">Orphan Steerings</span>';
@@ -2235,6 +2442,36 @@ var CognitivePanel = (function () {
         }
       });
     });
+
+    // Wire onboarding section collapse toggle
+    var onboardingHeader = document.getElementById('onboarding-header');
+    if (onboardingHeader) {
+      onboardingHeader.addEventListener('click', function() {
+        var body = document.getElementById('onboarding-body');
+        var icon = document.getElementById('onboarding-toggle-icon');
+        if (body && icon) {
+          var isHidden = body.style.display === 'none';
+          body.style.display = isHidden ? '' : 'none';
+          icon.textContent = isHidden ? '\u25BC' : '\u25B6';
+          try { localStorage.setItem('onboarding-collapsed', isHidden ? 'false' : 'true'); } catch (e) { /* ignore */ }
+        }
+      });
+    }
+
+    // Wire "Create from Template" button
+    var createBtn = document.getElementById('onboarding-create-btn');
+    if (createBtn) {
+      createBtn.addEventListener('click', function() {
+        if (typeof vscode !== 'undefined') {
+          vscode.postMessage({
+            type: 'createFromTemplate',
+            templateKey: createBtn.getAttribute('data-template'),
+            fileName: createBtn.getAttribute('data-filename'),
+            targetDir: createBtn.getAttribute('data-targetdir'),
+          });
+        }
+      });
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -2269,6 +2506,6 @@ var CognitivePanel = (function () {
 function updateCognitivePanel(data, degrees, workspaceFolders, statsHistoryData) {
   if (typeof CognitivePanel !== 'undefined') {
     var analysis = CognitivePanel.computeAnalysis(data, degrees, workspaceFolders);
-    CognitivePanel.renderPanel(analysis, statsHistoryData);
+    CognitivePanel.renderPanel(analysis, statsHistoryData, data);
   }
 }

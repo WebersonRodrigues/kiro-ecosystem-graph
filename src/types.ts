@@ -656,6 +656,41 @@ export interface ScoreTrend {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Ecosystem Maturity (Onboarding Wizard)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Ecosystem maturity phase (1-5) */
+export type EcosystemPhaseNumber = 1 | 2 | 3 | 4 | 5;
+
+/** Phase detection result */
+export interface EcosystemPhaseResult {
+  /** Current phase number */
+  phase: EcosystemPhaseNumber;
+  /** Phase display name */
+  phaseName: string;
+  /** Progress within current phase (0-100) */
+  progressPercent: number;
+  /** Criteria met for current phase */
+  criteriaMet: string[];
+  /** Criteria remaining for next phase */
+  criteriaRemaining: string[];
+}
+
+/** Next step suggestion */
+export interface NextStepSuggestion {
+  /** Suggested file name */
+  fileName: string;
+  /** File type */
+  fileType: 'steering' | 'hook';
+  /** Brief description */
+  description: string;
+  /** Template key for creation */
+  templateKey: string;
+  /** Target directory */
+  targetDir: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Extension <-> Webview Communication
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -685,7 +720,9 @@ export type WebviewMessage =
   | { type: 'exportCognitiveAnalysis'; data: CognitiveAnalysisResult | null }
   // ─── Auto-Fix messages ───
   | { type: 'fixIssue'; category: IssueCategory; issue: FixIssueData }
-  | { type: 'fixAllCategory'; category: IssueCategory; issues: FixIssueData[] };
+  | { type: 'fixAllCategory'; category: IssueCategory; issues: FixIssueData[] }
+  // ─── Onboarding Wizard messages ───
+  | { type: 'createFromTemplate'; templateKey: string; fileName: string; targetDir: string };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Stats History (Temporal Evolution)
