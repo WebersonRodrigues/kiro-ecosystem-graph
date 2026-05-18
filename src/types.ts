@@ -195,6 +195,8 @@ export interface GraphNode {
     whenType?: string;
     /** Hook description from JSON */
     description?: string;
+    /** Hook prompt content from then.prompt — used for self-sufficiency analysis */
+    hookPrompt?: string;
     /** Labels of all steering files referenced by this hook */
     referencedSteerings?: string[];
 

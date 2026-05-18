@@ -304,4 +304,94 @@ describe('ParserService', function () {
       assert.strictEqual(result.references[0].type, 'wiki-link');
     });
   });
+
+  describe('extractFrontMatter() — inclusion quote stripping', function () {
+    it('strips double quotes from inclusion value', function () {
+      const file = createMockSteeringFile('.kiro/steering/api-patterns.md');
+      const content = [
+        '---',
+        'inclusion: "fileMatch"',
+        '---',
+        '# API Patterns',
+      ].join('\n');
+      const knownFiles = new Map<string, string>();
+
+      const result = parserService.parse(file, content, knownFiles);
+      assert.strictEqual(result.node.metadata?.inclusion, 'fileMatch');
+    });
+
+    it('strips single quotes from inclusion value', function () {
+      const file = createMockSteeringFile('.kiro/steering/manual-deploy.md');
+      const content = [
+        '---',
+        "inclusion: 'manual'",
+        '---',
+        '# Manual Deploy',
+      ].join('\n');
+      const knownFiles = new Map<string, string>();
+
+      const result = parserService.parse(file, content, knownFiles);
+      assert.strictEqual(result.node.metadata?.inclusion, 'manual');
+    });
+
+    it('preserves unquoted inclusion value', function () {
+      const file = createMockSteeringFile('.kiro/steering/always-on.md');
+      const content = [
+        '---',
+        'inclusion: always',
+        '---',
+        '# Always On',
+      ].join('\n');
+      const knownFiles = new Map<string, string>();
+
+      const result = parserService.parse(file, content, knownFiles);
+      assert.strictEqual(result.node.metadata?.inclusion, 'always');
+    });
+  });
+
+  describe('parseHook() — hookPrompt metadata', function () {
+    it('stores then.prompt as hookPrompt in metadata', function () {
+      const file = createMockEcosystemFile('.kiro/hooks/review.json');
+      const prompt = 'Analise o código e verifique se segue os padrões estabelecidos no projeto';
+      const content = JSON.stringify({
+        name: 'Code Review',
+        description: 'Reviews code changes',
+        when: { type: 'postToolUse' },
+        then: { prompt },
+      });
+      const knownFiles = new Map<string, string>();
+
+      const result = parserService.parseHook(file, content, knownFiles);
+      assert.ok(result !== null);
+      assert.strictEqual(result!.node.metadata?.hookPrompt, prompt);
+    });
+
+    it('stores empty string as hookPrompt when prompt is empty', function () {
+      const file = createMockEcosystemFile('.kiro/hooks/simple.json');
+      const content = JSON.stringify({
+        name: 'Simple Hook',
+        when: { type: 'fileEdited' },
+        then: { prompt: '' },
+      });
+      const knownFiles = new Map<string, string>();
+
+      const result = parserService.parseHook(file, content, knownFiles);
+      assert.ok(result !== null);
+      assert.strictEqual(result!.node.metadata?.hookPrompt, '');
+    });
+
+    it('stores empty string as hookPrompt when then.prompt is missing', function () {
+      const file = createMockEcosystemFile('.kiro/hooks/no-prompt.json');
+      const content = JSON.stringify({
+        name: 'No Prompt Hook',
+        when: { type: 'fileEdited' },
+        then: { command: 'npm run lint' },
+      });
+      const knownFiles = new Map<string, string>();
+
+      const result = parserService.parseHook(file, content, knownFiles);
+      assert.ok(result !== null);
+      assert.strictEqual(result!.node.metadata?.hookPrompt, '');
+    });
+  });
 });

@@ -232,6 +232,7 @@ export class ParserService {
       ...node.metadata,
       whenType,
       description,
+      hookPrompt: prompt || '',
       referencedSteerings: referencedSteerings.length > 0 ? referencedSteerings : undefined,
     };
 
@@ -397,7 +398,9 @@ export class ParserService {
       return {};
     }
 
-    return { inclusion: inclusionMatch[1].trim() };
+    const raw = inclusionMatch[1].trim();
+    const cleaned = raw.replace(/^["']|["']$/g, '');
+    return { inclusion: cleaned };
   }
 
   /**

@@ -572,3 +572,402 @@ describe('Cognitive Validations — DML Protection (Property)', function () {
     );
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// False Positives Fix — Bug Condition Exploration Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+import {
+  computeContextOverload,
+  computeOrphanSteerings,
+  computeIsolatedFiles,
+  computeHooksWithoutInstruction,
+  isPromptSelfSufficient,
+} from '../../services/cognitiveValidations';
+
+describe('Bug Condition — Context Overload excludes fileMatch/manual (Property)', function () {
+  this.timeout(30000);
+
+  /**
+   * **Validates: Requirements 1.1, 2.1**
+   *
+   * For any steering with inclusion fileMatch or manual,
+   * computeContextOverload must NOT include it in the result.
+   */
+  it('steerings with fileMatch/manual inclusion are NOT in overload result', function () {
+    const inclusionArb = fc.constantFrom('fileMatch', 'manual');
+    const lineCountArb = fc.integer({ min: 351, max: 5000 });
+
+    fc.assert(
+      fc.property(inclusionArb, lineCountArb, (inclusion, lineCount) => {
+        const node = makeNode('test-steering.md', {
+          type: 'steering-domain',
+          metadata: { inclusion, lineCount },
+        });
+        const result = computeContextOverload([node]);
+        assert.strictEqual(result.overloaded.length, 0,
+          `Steering with inclusion=${inclusion} should NOT be in overload`);
+        assert.strictEqual(result.totalAlwaysLines, 0,
+          `Steering with inclusion=${inclusion} should NOT count in totalAlwaysLines`);
+      }),
+      { numRuns: 50 },
+    );
+  });
+
+  it('multiple fileMatch/manual steerings produce empty overload', function () {
+    const nodes: GraphNode[] = [
+      makeNode('a.md', { type: 'steering-flow', metadata: { inclusion: 'fileMatch', lineCount: 400 } }),
+      makeNode('b.md', { type: 'steering-tech', metadata: { inclusion: 'manual', lineCount: 500 } }),
+      makeNode('c.md', { type: 'steering-domain', metadata: { inclusion: 'fileMatch', lineCount: 1000 } }),
+    ];
+    const result = computeContextOverload(nodes);
+    assert.strictEqual(result.overloaded.length, 0);
+    assert.strictEqual(result.totalAlwaysLines, 0);
+  });
+});
+
+describe('Bug Condition — Orphan Steerings excludes fileMatch/manual (Property)', function () {
+  this.timeout(30000);
+
+  /**
+   * **Validates: Requirements 1.2, 2.2**
+   *
+   * For any steering with inclusion fileMatch or manual and 0 connections,
+   * computeOrphanSteerings must NOT include it in the result.
+   */
+  it('steerings with fileMatch/manual inclusion are NOT marked as orphans', function () {
+    const inclusionArb = fc.constantFrom('fileMatch', 'manual');
+
+    fc.assert(
+      fc.property(inclusionArb, (inclusion) => {
+        const node = makeNode('orphan-test.md', {
+          type: 'steering-domain',
+          metadata: { inclusion },
+        });
+        const result = computeOrphanSteerings([node], []);
+        assert.strictEqual(result.length, 0,
+          `Steering with inclusion=${inclusion} should NOT be marked as orphan`);
+      }),
+      { numRuns: 50 },
+    );
+  });
+
+  it('fileMatch/manual steerings with zero edges are not orphans', function () {
+    const nodes: GraphNode[] = [
+      makeNode('a.md', { type: 'steering-flow', metadata: { inclusion: 'fileMatch' } }),
+      makeNode('b.md', { type: 'steering-tech', metadata: { inclusion: 'manual' } }),
+    ];
+    const result = computeOrphanSteerings(nodes, []);
+    assert.strictEqual(result.length, 0);
+  });
+});
+
+describe('Bug Condition — Isolated Files excludes hooks and skills (Property)', function () {
+  this.timeout(30000);
+
+  /**
+   * **Validates: Requirements 1.3, 2.3**
+   *
+   * For any node with type hook-auto, hook-manual, or skill,
+   * computeIsolatedFiles must NOT include it in the result.
+   */
+  it('hooks and skills with 0 connections are NOT marked as isolated', function () {
+    const typeArb = fc.constantFrom('hook-auto' as const, 'hook-manual' as const, 'skill' as const);
+
+    fc.assert(
+      fc.property(typeArb, (nodeType) => {
+        const node = makeNode('test-node.md', { type: nodeType });
+        const result = computeIsolatedFiles([node], []);
+        assert.strictEqual(result.length, 0,
+          `Node with type=${nodeType} should NOT be marked as isolated`);
+      }),
+      { numRuns: 30 },
+    );
+  });
+
+  it('multiple hooks and skills with zero edges are not isolated', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook1.json', { type: 'hook-auto' }),
+      makeNode('hook2.json', { type: 'hook-manual' }),
+      makeNode('skill1.md', { type: 'skill' }),
+    ];
+    const result = computeIsolatedFiles(nodes, []);
+    assert.strictEqual(result.length, 0);
+  });
+});
+
+describe('Bug Condition — Hooks Without Instruction recognizes self-sufficient prompts (Property)', function () {
+  this.timeout(30000);
+
+  /**
+   * **Validates: Requirements 1.4, 2.4**
+   *
+   * For any hook with a self-sufficient prompt (>= 20 words + imperative verbs)
+   * and no steering reference, computeHooksWithoutInstruction must NOT flag it.
+   */
+  it('hooks with self-sufficient prompts are NOT flagged', function () {
+    const verbArb = fc.constantFrom(
+      'analise', 'verifique', 'garanta', 'ensure', 'verify', 'check',
+      'validate', 'review', 'implement', 'always', 'must', 'should',
+    );
+    const fillerArb = fc.constantFrom(
+      'the', 'code', 'changes', 'output', 'result', 'file', 'module',
+      'function', 'class', 'method', 'variable', 'pattern', 'structure',
+      'logic', 'behavior', 'input', 'data', 'format', 'style', 'naming',
+    );
+
+    // Generate prompts with >= 20 words including at least one imperative verb
+    const promptArb = fc.tuple(
+      verbArb,
+      fc.array(fillerArb, { minLength: 19, maxLength: 40 }),
+    ).map(([verb, fillers]) => [verb, ...fillers].join(' '));
+
+    fc.assert(
+      fc.property(promptArb, (prompt) => {
+        const node = makeNode('hook-test.json', {
+          type: 'hook-auto',
+          metadata: { hookPrompt: prompt },
+        });
+        const result = computeHooksWithoutInstruction([node], []);
+        assert.strictEqual(result.length, 0,
+          `Hook with self-sufficient prompt should NOT be flagged`);
+      }),
+      { numRuns: 50 },
+    );
+  });
+
+  it('hook with 30-word imperative prompt is not flagged', function () {
+    const prompt = 'Analise o código alterado e verifique se segue os padrões de nomenclatura do projeto. Garanta que não há duplicação de lógica e que os testes cobrem os cenários principais. Reporte qualquer violação encontrada.';
+    const node = makeNode('review-hook.json', {
+      type: 'hook-auto',
+      metadata: { hookPrompt: prompt },
+    });
+    const result = computeHooksWithoutInstruction([node], []);
+    assert.strictEqual(result.length, 0);
+  });
+});
+
+describe('Bug Condition — Parser strips quotes from inclusion (Property)', function () {
+  this.timeout(30000);
+
+  /**
+   * **Validates: Requirements 1.1, 3.5**
+   *
+   * The isPromptSelfSufficient function correctly evaluates prompts.
+   * This test validates the fix indirectly through the validation functions.
+   */
+  it('isPromptSelfSufficient returns true for adequate prompts', function () {
+    const prompt = 'Ensure that all code changes follow the established patterns and verify that no regressions are introduced in the test suite before completing the task';
+    assert.strictEqual(isPromptSelfSufficient(prompt), true);
+  });
+
+  it('isPromptSelfSufficient returns false for short prompts', function () {
+    assert.strictEqual(isPromptSelfSufficient('check code'), false);
+    assert.strictEqual(isPromptSelfSufficient(''), false);
+    assert.strictEqual(isPromptSelfSufficient(null), false);
+    assert.strictEqual(isPromptSelfSufficient(undefined), false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// False Positives Fix — Preservation Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Preservation — Context Overload keeps always/auto steerings (Property)', function () {
+  this.timeout(30000);
+
+  /**
+   * **Validates: Requirements 3.1**
+   *
+   * For any steering with inclusion always or auto and lineCount > 350,
+   * computeContextOverload MUST include it in the result.
+   */
+  it('steerings with always/auto inclusion and >350 lines ARE in overload', function () {
+    const inclusionArb = fc.constantFrom('always', 'auto');
+    const lineCountArb = fc.integer({ min: 351, max: 5000 });
+
+    fc.assert(
+      fc.property(inclusionArb, lineCountArb, (inclusion, lineCount) => {
+        const node = makeNode('big-steering.md', {
+          type: 'steering-domain',
+          metadata: { inclusion, lineCount },
+        });
+        const result = computeContextOverload([node]);
+        assert.strictEqual(result.overloaded.length, 1,
+          `Steering with inclusion=${inclusion} and ${lineCount} lines should be in overload`);
+        assert.strictEqual(result.totalAlwaysLines, lineCount);
+      }),
+      { numRuns: 50 },
+    );
+  });
+
+  it('steerings without inclusion (default always) and >350 lines ARE in overload', function () {
+    const lineCountArb = fc.integer({ min: 351, max: 5000 });
+
+    fc.assert(
+      fc.property(lineCountArb, (lineCount) => {
+        const node = makeNode('default-steering.md', {
+          type: 'steering-flow',
+          metadata: { lineCount },
+        });
+        const result = computeContextOverload([node]);
+        assert.strictEqual(result.overloaded.length, 1);
+        assert.strictEqual(result.totalAlwaysLines, lineCount);
+      }),
+      { numRuns: 30 },
+    );
+  });
+});
+
+describe('Preservation — Orphan Steerings keeps always/auto without connections (Property)', function () {
+  this.timeout(30000);
+
+  /**
+   * **Validates: Requirements 3.2**
+   *
+   * For any steering with inclusion always or auto and 0 connections,
+   * computeOrphanSteerings MUST include it in the result.
+   */
+  it('steerings with always/auto inclusion and 0 edges ARE orphans', function () {
+    const inclusionArb = fc.constantFrom('always', 'auto');
+
+    fc.assert(
+      fc.property(inclusionArb, (inclusion) => {
+        const node = makeNode('orphan-always.md', {
+          type: 'steering-domain',
+          metadata: { inclusion },
+        });
+        const result = computeOrphanSteerings([node], []);
+        assert.strictEqual(result.length, 1,
+          `Steering with inclusion=${inclusion} and 0 edges should be orphan`);
+      }),
+      { numRuns: 30 },
+    );
+  });
+
+  it('steerings without inclusion (default always) and 0 edges ARE orphans', function () {
+    const node = makeNode('no-inclusion.md', {
+      type: 'steering-tech',
+      metadata: {},
+    });
+    const result = computeOrphanSteerings([node], []);
+    assert.strictEqual(result.length, 1);
+  });
+});
+
+describe('Preservation — Isolated Files keeps steerings without connections (Property)', function () {
+  this.timeout(30000);
+
+  /**
+   * **Validates: Requirements 3.3**
+   *
+   * For any steering node with 0 edges, computeIsolatedFiles MUST include it.
+   */
+  it('steering nodes with 0 edges ARE marked as isolated', function () {
+    const typeArb = fc.constantFrom(
+      'steering-domain' as const,
+      'steering-flow' as const,
+      'steering-tech' as const,
+      'steering-help' as const,
+      'steering-policy' as const,
+    );
+
+    fc.assert(
+      fc.property(typeArb, (nodeType) => {
+        const node = makeNode('isolated-steering.md', { type: nodeType });
+        const result = computeIsolatedFiles([node], []);
+        assert.strictEqual(result.length, 1,
+          `Steering with type=${nodeType} and 0 edges should be isolated`);
+      }),
+      { numRuns: 30 },
+    );
+  });
+
+  it('non-hook non-skill nodes with 0 edges ARE isolated', function () {
+    const nodes: GraphNode[] = [
+      makeNode('a.md', { type: 'steering-domain' }),
+      makeNode('b.md', { type: 'steering-flow' }),
+      makeNode('c.md', { type: 'unknown' }),
+    ];
+    const result = computeIsolatedFiles(nodes, []);
+    assert.strictEqual(result.length, 3);
+  });
+});
+
+describe('Preservation — Hooks Without Instruction keeps hooks with insufficient prompts (Property)', function () {
+  this.timeout(30000);
+
+  /**
+   * **Validates: Requirements 3.4**
+   *
+   * For any hook without steering ref AND with empty/short/non-imperative prompt,
+   * computeHooksWithoutInstruction MUST flag it.
+   */
+  it('hooks with empty prompt and no steering ref ARE flagged', function () {
+    const node = makeNode('empty-hook.json', {
+      type: 'hook-auto',
+      metadata: { hookPrompt: '' },
+    });
+    const result = computeHooksWithoutInstruction([node], []);
+    assert.strictEqual(result.length, 1);
+  });
+
+  it('hooks with short prompt (< 20 words) and no steering ref ARE flagged', function () {
+    const shortPromptArb = fc.array(
+      fc.constantFrom('run', 'lint', 'check', 'code', 'file', 'test'),
+      { minLength: 1, maxLength: 19 },
+    ).map((words) => words.join(' '));
+
+    fc.assert(
+      fc.property(shortPromptArb, (prompt) => {
+        const node = makeNode('short-hook.json', {
+          type: 'hook-auto',
+          metadata: { hookPrompt: prompt },
+        });
+        const result = computeHooksWithoutInstruction([node], []);
+        assert.strictEqual(result.length, 1,
+          `Hook with ${prompt.split(/\s+/).length}-word prompt should be flagged`);
+      }),
+      { numRuns: 30 },
+    );
+  });
+
+  it('hooks with 25-word prompt but no imperative verbs ARE flagged', function () {
+    // Generate a prompt with 25 words but no imperative verbs
+    const fillerWords = Array(25).fill('lorem').join(' ');
+    const node = makeNode('no-verb-hook.json', {
+      type: 'hook-auto',
+      metadata: { hookPrompt: fillerWords },
+    });
+    const result = computeHooksWithoutInstruction([node], []);
+    assert.strictEqual(result.length, 1);
+  });
+});
+
+describe('Preservation — Parser extracts inclusion without quotes correctly (Property)', function () {
+  this.timeout(30000);
+
+  /**
+   * **Validates: Requirements 3.5**
+   *
+   * The computeContextOverload function works correctly with nodes
+   * that have properly extracted inclusion values (no quotes).
+   */
+  it('nodes with inclusion=always are correctly processed', function () {
+    const node = makeNode('always-steering.md', {
+      type: 'steering-domain',
+      metadata: { inclusion: 'always', lineCount: 400 },
+    });
+    const result = computeContextOverload([node]);
+    assert.strictEqual(result.overloaded.length, 1);
+  });
+
+  it('nodes with inclusion=fileMatch are correctly excluded', function () {
+    const node = makeNode('filematch-steering.md', {
+      type: 'steering-domain',
+      metadata: { inclusion: 'fileMatch', lineCount: 400 },
+    });
+    const result = computeContextOverload([node]);
+    assert.strictEqual(result.overloaded.length, 0);
+  });
+});

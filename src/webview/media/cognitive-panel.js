@@ -824,6 +824,20 @@ var CognitivePanel = (function () {
   }
 
   /**
+   * Evaluate whether a hook prompt is self-sufficient.
+   * Criteria: non-empty, >= 20 words, contains imperative verbs.
+   * @param {string} content
+   * @returns {boolean}
+   */
+  function isPromptSelfSufficient(content) {
+    if (!content) { return false; }
+    var words = content.trim().split(/\s+/);
+    if (words.length < 20) { return false; }
+    var imperativePattern = /\b(analise|verifique|garanta|implemente|crie|remova|adicione|corrija|valide|reporte|documente|teste|refatore|otimize|configure|monitore|ensure|verify|check|validate|create|remove|add|fix|report|document|test|refactor|optimize|configure|monitor|analyze|review|implement|always|never|must|shall|should)\b/i;
+    return imperativePattern.test(content);
+  }
+
+  /**
    * Compute cognitive analysis from graph data.
    * @param {{ nodes: any[], links: any[] }} data
    * @param {Map<string, number>} degrees
@@ -856,6 +870,9 @@ var CognitivePanel = (function () {
       if (n.type && n.type.indexOf('steering-') === 0) {
         // Skip external/global resolved nodes
         if (n.source && n.source !== 'local' && n.resolved !== false) { return; }
+        var inclusion = (n.metadata && n.metadata.inclusion) || 'always';
+        // Exclude fileMatch/manual — don't need cross-references
+        if (inclusion === 'fileMatch' || inclusion === 'manual') { return; }
         if ((incomingMap[n.id] || 0) === 0 && (outgoingMap[n.id] || 0) === 0) {
           steeringsSoltos.push({ id: n.id, label: n.label });
         }
@@ -886,6 +903,8 @@ var CognitivePanel = (function () {
     data.nodes.forEach(function(n) {
       // Skip external/global resolved nodes
       if (n.source && n.source !== 'local' && n.resolved !== false) { return; }
+      // Exclude hooks and skills — activated by independent mechanisms
+      if (n.type === 'hook-auto' || n.type === 'hook-manual' || n.type === 'skill') { return; }
       var totalEdges = (incomingMap[n.id] || 0) + (outgoingMap[n.id] || 0);
       if (totalEdges === 0) {
         arquivosSemContexto.push({ id: n.id, label: n.label, type: n.type });
@@ -929,6 +948,8 @@ var CognitivePanel = (function () {
       if (n.type && n.type.indexOf('steering-') === 0) {
         var inclusion = (n.metadata && n.metadata.inclusion) || 'always';
         var lineCount = (n.metadata && n.metadata.lineCount) || 0;
+        // Exclude fileMatch/manual — not always-loaded
+        if (inclusion === 'fileMatch' || inclusion === 'manual') { return; }
         if (inclusion === 'always' || inclusion === 'auto') {
           totalAlwaysLines += lineCount;
           if (lineCount > 350) {
@@ -964,7 +985,11 @@ var CognitivePanel = (function () {
           }
         });
         if (!hasSteeringRef) {
-          hooksWithoutInstruction.push({ id: n.id, label: n.label });
+          // Evaluate prompt sufficiency — use hookPrompt with fallback to description
+          var promptContent = (n.metadata && n.metadata.hookPrompt) || (n.metadata && n.metadata.description) || '';
+          if (!isPromptSelfSufficient(promptContent)) {
+            hooksWithoutInstruction.push({ id: n.id, label: n.label });
+          }
         }
       }
     });

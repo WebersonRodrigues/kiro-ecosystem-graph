@@ -498,3 +498,186 @@ export function computeDmlProtectionLevel(
   if (hasDmlHook || hasDmlSteering) { return 1; }
   return 0;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Context Overload
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Computes context overload: steerings that are always-loaded with too many lines.
+ * Excludes steerings with inclusion 'fileMatch' or 'manual' since they are not
+ * always-loaded into the context window.
+ *
+ * @param nodes - All graph nodes
+ * @param threshold - Line count threshold to flag (default 350)
+ * @returns Object with overloaded steerings and total always-loaded lines
+ */
+export function computeContextOverload(
+  nodes: GraphNode[],
+  threshold: number = 350,
+): { overloaded: Array<{ id: string; label: string; lineCount: number }>; totalAlwaysLines: number } {
+  const overloaded: Array<{ id: string; label: string; lineCount: number }> = [];
+  let totalAlwaysLines = 0;
+
+  for (const n of nodes) {
+    if (!n.type || !n.type.startsWith('steering-')) { continue; }
+    const inclusion = (n.metadata && n.metadata.inclusion) || 'always';
+    // SKIP fileMatch/manual — not always-loaded
+    if (inclusion === 'fileMatch' || inclusion === 'manual') { continue; }
+    const lineCount = (n.metadata && n.metadata.lineCount) || 0;
+    if (inclusion === 'always' || inclusion === 'auto') {
+      totalAlwaysLines += lineCount;
+      if (lineCount > threshold) {
+        overloaded.push({ id: n.id, label: n.label, lineCount });
+      }
+    }
+  }
+
+  return { overloaded, totalAlwaysLines };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Orphan Steerings
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Computes orphan steerings: steerings with 0 incoming + 0 outgoing edges.
+ * Excludes steerings with inclusion 'fileMatch' or 'manual' since they
+ * function independently of cross-references.
+ *
+ * @param nodes - All graph nodes
+ * @param edges - All graph edges
+ * @returns Array of orphan steerings
+ */
+export function computeOrphanSteerings(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+): Array<{ id: string; label: string }> {
+  const incomingMap: Record<string, number> = {};
+  const outgoingMap: Record<string, number> = {};
+  for (const n of nodes) { incomingMap[n.id] = 0; outgoingMap[n.id] = 0; }
+  for (const e of edges) {
+    if (outgoingMap[e.source] !== undefined) { outgoingMap[e.source]++; }
+    if (incomingMap[e.target] !== undefined) { incomingMap[e.target]++; }
+  }
+
+  const orphans: Array<{ id: string; label: string }> = [];
+  for (const n of nodes) {
+    if (!n.type || !n.type.startsWith('steering-')) { continue; }
+    if (n.source && n.source !== 'local' && n.resolved !== false) { continue; }
+    const inclusion = (n.metadata && n.metadata.inclusion) || 'always';
+    // SKIP fileMatch/manual — don't need cross-references
+    if (inclusion === 'fileMatch' || inclusion === 'manual') { continue; }
+    if ((incomingMap[n.id] || 0) === 0 && (outgoingMap[n.id] || 0) === 0) {
+      orphans.push({ id: n.id, label: n.label });
+    }
+  }
+
+  return orphans;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Isolated Files
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Computes isolated files: nodes with 0 total edges.
+ * Excludes hooks and skills since they are activated by independent mechanisms
+ * (IDE events for hooks, keyword matching for skills).
+ *
+ * @param nodes - All graph nodes
+ * @param edges - All graph edges
+ * @returns Array of isolated files
+ */
+export function computeIsolatedFiles(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+): Array<{ id: string; label: string; type: string }> {
+  const incomingMap: Record<string, number> = {};
+  const outgoingMap: Record<string, number> = {};
+  for (const n of nodes) { incomingMap[n.id] = 0; outgoingMap[n.id] = 0; }
+  for (const e of edges) {
+    if (outgoingMap[e.source] !== undefined) { outgoingMap[e.source]++; }
+    if (incomingMap[e.target] !== undefined) { incomingMap[e.target]++; }
+  }
+
+  const isolated: Array<{ id: string; label: string; type: string }> = [];
+  for (const n of nodes) {
+    if (n.source && n.source !== 'local' && n.resolved !== false) { continue; }
+    // SKIP hooks and skills — activated by independent mechanisms
+    if (n.type === 'hook-auto' || n.type === 'hook-manual' || n.type === 'skill') { continue; }
+    const totalEdges = (incomingMap[n.id] || 0) + (outgoingMap[n.id] || 0);
+    if (totalEdges === 0) {
+      isolated.push({ id: n.id, label: n.label, type: n.type || 'unknown' });
+    }
+  }
+
+  return isolated;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Prompt Self-Sufficiency
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Regex matching imperative verbs in PT-BR and EN */
+const IMPERATIVE_VERBS = /\b(analise|verifique|garanta|implemente|crie|remova|adicione|corrija|valide|reporte|documente|teste|refatore|otimize|configure|monitore|ensure|verify|check|validate|create|remove|add|fix|report|document|test|refactor|optimize|configure|monitor|analyze|review|implement|always|never|must|shall|should)\b/i;
+
+/**
+ * Evaluates whether a hook prompt is self-sufficient (contains enough
+ * instructional content to guide the AI agent without a steering reference).
+ *
+ * Criteria:
+ * - Content is not null/empty
+ * - Contains >= 20 words
+ * - Contains at least one imperative verb (PT-BR or EN)
+ *
+ * @param content - The prompt content to evaluate
+ * @returns true if the prompt is self-sufficient
+ */
+export function isPromptSelfSufficient(content: string | undefined | null): boolean {
+  if (!content) { return false; }
+  const words = content.trim().split(/\s+/);
+  if (words.length < 20) { return false; }
+  return IMPERATIVE_VERBS.test(content);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hooks Without Instruction
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Computes hooks without instruction: hooks that have no steering reference
+ * AND no self-sufficient prompt. Uses hookPrompt (from then.prompt) with
+ * fallback to description.
+ *
+ * @param nodes - All graph nodes
+ * @param edges - All graph edges
+ * @returns Array of hooks without instruction
+ */
+export function computeHooksWithoutInstruction(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+): Array<{ id: string; label: string }> {
+  const steeringIds = new Set<string>();
+  for (const n of nodes) {
+    if (n.type && n.type.startsWith('steering-')) { steeringIds.add(n.id); }
+  }
+
+  const result: Array<{ id: string; label: string }> = [];
+  for (const n of nodes) {
+    if (n.type !== 'hook-auto' && n.type !== 'hook-manual') { continue; }
+
+    const hasSteeringRef = edges.some(
+      (e) => e.source === n.id && steeringIds.has(e.target),
+    );
+    if (hasSteeringRef) { continue; }
+
+    // Evaluate prompt sufficiency — use hookPrompt with fallback to description
+    const promptContent = (n.metadata && n.metadata.hookPrompt) || (n.metadata && n.metadata.description) || '';
+    if (isPromptSelfSufficient(promptContent)) { continue; }
+
+    result.push({ id: n.id, label: n.label });
+  }
+
+  return result;
+}
