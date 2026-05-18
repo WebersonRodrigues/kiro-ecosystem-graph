@@ -238,5 +238,54 @@ describe('MarkdownReportGenerator', function () {
       assert.ok(report.startsWith('# Cognitive Analysis Report'));
       assert.ok(report.includes('Generated:'));
     });
+
+    it('Stale Content section generated with valid data', function () {
+      const data = createMinimalResult();
+      data.staleContent = [
+        { id: 'old-hub.md', label: 'old-hub', stalenessDays: 120, degree: 5, riskScore: 600 },
+        { id: 'stale.md', label: 'stale', stalenessDays: 95, degree: 3, riskScore: 285 },
+      ];
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('## Stale Content'));
+      assert.ok(report.includes('| `old-hub.md` | old-hub | 120 | 5 | 600 |'));
+      assert.ok(report.includes('| `stale.md` | stale | 95 | 3 | 285 |'));
+      assert.ok(report.includes('| File | Label | Days Stale | Degree | Risk Score | Tip |'));
+    });
+
+    it('Stale Content section omitted when empty', function () {
+      const data = createMinimalResult();
+      data.staleContent = [];
+
+      const report = generateCognitiveReport(data);
+      assert.ok(!report.includes('## Stale Content'));
+    });
+
+    it('Stale Content included in Summary table', function () {
+      const data = createMinimalResult();
+      data.staleContent = [
+        { id: 'old.md', label: 'old', stalenessDays: 100, degree: 4, riskScore: 400 },
+      ];
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('| Stale Content | 1 |'));
+    });
+
+    it('Stale Content not in Summary when empty', function () {
+      const data = createMinimalResult();
+      // staleContent undefined
+      const report = generateCognitiveReport(data);
+      assert.ok(!report.includes('| Stale Content |'));
+    });
+
+    it('Instructions for AI includes stale content step', function () {
+      const data = createMinimalResult();
+      data.staleContent = [
+        { id: 'old.md', label: 'old', stalenessDays: 100, degree: 4, riskScore: 400 },
+      ];
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('For each Stale Content steering, review and update'));
+    });
   });
 });

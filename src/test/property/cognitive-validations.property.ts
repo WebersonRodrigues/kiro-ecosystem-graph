@@ -1293,3 +1293,193 @@ describe('Fragile Links Filter (Property)', function () {
     );
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stale Content Detection (Rule 20) — Property-Based Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { detectStaleContent } from '../../services/cognitiveValidations';
+
+describe('Stale Content Detection (Property)', function () {
+  this.timeout(30000);
+
+  const DAY_MS = 1000 * 60 * 60 * 24;
+  const NOW = 1700000000000;
+
+  /**
+   * **Validates: Requirements 1.2**
+   * Property: riskScore always === stalenessDays × degree for each result.
+   */
+  it('riskScore === stalenessDays × degree for all results', function () {
+    const mtimeArb = fc.integer({ min: 1, max: 365 }).map((days) => NOW - (days * DAY_MS));
+    const degreeArb = fc.integer({ min: 1, max: 10 });
+
+    fc.assert(
+      fc.property(
+        fc.array(fc.tuple(mtimeArb, degreeArb), { minLength: 1, maxLength: 10 }),
+        (configs) => {
+          const nodes: GraphNode[] = [];
+          const edges: GraphEdge[] = [];
+
+          configs.forEach(([mtime, targetDegree], i) => {
+            const nodeId = `steer-${i}.md`;
+            nodes.push(makeNode(nodeId, { type: 'steering-domain', metadata: { mtime } }));
+            for (let j = 0; j < targetDegree; j++) {
+              const targetId = `target-${i}-${j}.md`;
+              nodes.push(makeNode(targetId));
+              edges.push({ source: nodeId, target: targetId, type: 'wiki-link' });
+            }
+          });
+
+          const result = detectStaleContent(nodes, edges, {
+            stalenessThresholdDays: 0,
+            degreeThreshold: 0,
+            currentTimeMs: NOW,
+          });
+
+          for (const alert of result) {
+            assert.strictEqual(
+              alert.riskScore,
+              alert.stalenessDays * alert.degree,
+              `riskScore should be ${alert.stalenessDays} × ${alert.degree}`,
+            );
+          }
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+
+  /**
+   * **Validates: Requirements 1.3**
+   * Property: results always sorted by riskScore descending.
+   */
+  it('results sorted by riskScore descending', function () {
+    const mtimeArb = fc.integer({ min: 1, max: 365 }).map((days) => NOW - (days * DAY_MS));
+
+    fc.assert(
+      fc.property(
+        fc.array(mtimeArb, { minLength: 2, maxLength: 10 }),
+        (mtimes) => {
+          const nodes: GraphNode[] = [];
+          const edges: GraphEdge[] = [];
+
+          mtimes.forEach((mtime, i) => {
+            const nodeId = `s-${i}.md`;
+            nodes.push(makeNode(nodeId, { type: 'steering-domain', metadata: { mtime } }));
+            for (let j = 0; j <= i; j++) {
+              const targetId = `t-${i}-${j}.md`;
+              nodes.push(makeNode(targetId));
+              edges.push({ source: nodeId, target: targetId, type: 'wiki-link' });
+            }
+          });
+
+          const result = detectStaleContent(nodes, edges, {
+            stalenessThresholdDays: 0,
+            degreeThreshold: 0,
+            currentTimeMs: NOW,
+          });
+
+          for (let k = 1; k < result.length; k++) {
+            assert.ok(
+              result[k - 1].riskScore >= result[k].riskScore,
+              `result[${k - 1}].riskScore (${result[k - 1].riskScore}) >= result[${k}].riskScore (${result[k].riskScore})`,
+            );
+          }
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+
+  /**
+   * **Validates: Requirements 1.5**
+   * Property: no result with stalenessDays < threshold (when threshold > 0).
+   */
+  it('no result with stalenessDays < threshold', function () {
+    const thresholdArb = fc.integer({ min: 1, max: 200 });
+    const mtimeArb = fc.integer({ min: 1, max: 365 }).map((days) => NOW - (days * DAY_MS));
+
+    fc.assert(
+      fc.property(
+        thresholdArb,
+        fc.array(mtimeArb, { minLength: 1, maxLength: 8 }),
+        (threshold, mtimes) => {
+          const nodes: GraphNode[] = [];
+          const edges: GraphEdge[] = [];
+
+          mtimes.forEach((mtime, i) => {
+            const nodeId = `n-${i}.md`;
+            nodes.push(makeNode(nodeId, { type: 'steering-domain', metadata: { mtime } }));
+            for (let j = 0; j < 5; j++) {
+              const targetId = `e-${i}-${j}.md`;
+              nodes.push(makeNode(targetId));
+              edges.push({ source: nodeId, target: targetId, type: 'wiki-link' });
+            }
+          });
+
+          const result = detectStaleContent(nodes, edges, {
+            stalenessThresholdDays: threshold,
+            degreeThreshold: 0,
+            currentTimeMs: NOW,
+          });
+
+          for (const alert of result) {
+            assert.ok(
+              alert.stalenessDays >= threshold,
+              `stalenessDays (${alert.stalenessDays}) should be >= threshold (${threshold})`,
+            );
+          }
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+
+  /**
+   * **Validates: Requirements 1.6**
+   * Property: no result with degree < degreeThreshold (when degreeThreshold > 0).
+   */
+  it('no result with degree < degreeThreshold', function () {
+    const degreeThresholdArb = fc.integer({ min: 1, max: 8 });
+    const mtimeArb = fc.integer({ min: 91, max: 365 }).map((days) => NOW - (days * DAY_MS));
+
+    fc.assert(
+      fc.property(
+        degreeThresholdArb,
+        fc.array(
+          fc.tuple(mtimeArb, fc.integer({ min: 1, max: 10 })),
+          { minLength: 1, maxLength: 8 },
+        ),
+        (degreeThreshold, configs) => {
+          const nodes: GraphNode[] = [];
+          const edges: GraphEdge[] = [];
+
+          configs.forEach(([mtime, edgeCount], i) => {
+            const nodeId = `d-${i}.md`;
+            nodes.push(makeNode(nodeId, { type: 'steering-domain', metadata: { mtime } }));
+            for (let j = 0; j < edgeCount; j++) {
+              const targetId = `dt-${i}-${j}.md`;
+              nodes.push(makeNode(targetId));
+              edges.push({ source: nodeId, target: targetId, type: 'wiki-link' });
+            }
+          });
+
+          const result = detectStaleContent(nodes, edges, {
+            stalenessThresholdDays: 0,
+            degreeThreshold,
+            currentTimeMs: NOW,
+          });
+
+          for (const alert of result) {
+            assert.ok(
+              alert.degree >= degreeThreshold,
+              `degree (${alert.degree}) should be >= degreeThreshold (${degreeThreshold})`,
+            );
+          }
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+});

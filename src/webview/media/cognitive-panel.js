@@ -483,6 +483,43 @@ var CognitivePanel = (function () {
     return results;
   }
 
+  /**
+   * Detect stale content: steering nodes not modified in a long time with high connectivity.
+   * @param {any[]} nodes
+   * @param {any[]} links
+   * @param {object} incomingMap
+   * @param {object} outgoingMap
+   * @returns {{ id: string, label: string, stalenessDays: number, degree: number, riskScore: number }[]}
+   */
+  function detectStaleContentWebview(nodes, links, incomingMap, outgoingMap) {
+    var STALENESS_THRESHOLD = 90;
+    var DEGREE_THRESHOLD = 3;
+    var now = Date.now();
+    var results = [];
+
+    nodes.forEach(function(n) {
+      if (!n.type || n.type.indexOf('steering-') !== 0) { return; }
+      if (!n.metadata || n.metadata.mtime == null) { return; }
+
+      var stalenessDays = Math.floor((now - n.metadata.mtime) / (1000 * 60 * 60 * 24));
+      if (stalenessDays < STALENESS_THRESHOLD) { return; }
+
+      var degree = (incomingMap[n.id] || 0) + (outgoingMap[n.id] || 0);
+      if (degree < DEGREE_THRESHOLD) { return; }
+
+      results.push({
+        id: n.id,
+        label: n.label,
+        stalenessDays: stalenessDays,
+        degree: degree,
+        riskScore: stalenessDays * degree,
+      });
+    });
+
+    results.sort(function(a, b) { return b.riskScore - a.riskScore; });
+    return results;
+  }
+
   // ─── Structure Validations ─────────────────────────────────────────────
 
   /**
@@ -1117,6 +1154,9 @@ var CognitivePanel = (function () {
       }
     });
 
+    // 12. Stale Content Detection (Rule 20)
+    var staleContent = detectStaleContentWebview(data.nodes, data.links, incomingMap, outgoingMap);
+
     // 11. Cross-Workspace Topology: group external nodes by workspace
     var crossWorkspaceTopology = [];
     var workspaceGroups = {};
@@ -1210,6 +1250,7 @@ var CognitivePanel = (function () {
       dmlProtection: dmlProtection,
       brokenExternalLinks: brokenExternalLinks,
       crossWorkspaceTopology: crossWorkspaceTopology,
+      staleContent: staleContent,
       healthScore: computeHealthScore({
         steeringsSoltos: steeringsSoltos,
         vinculosFrageis: vinculosFrageis,
@@ -1386,6 +1427,10 @@ var CognitivePanel = (function () {
     case 'hook-coverage':
       return (analysis.hookCoverageMap && analysis.hookCoverageMap.uncovered || []).map(function(item) {
         return { ids: [item.event], labels: [item.event], extra: { event: item.event } };
+      });
+    case 'stale-content':
+      return (analysis.staleContent || []).map(function(item) {
+        return { ids: [item.id], labels: [item.label], extra: { stalenessDays: item.stalenessDays, degree: item.degree, riskScore: item.riskScore } };
       });
     case 'decision-path': {
       var items = [];
@@ -1740,6 +1785,19 @@ var CognitivePanel = (function () {
     }
     html += '</div>';
 
+    // Stale Content (Rule 20)
+    if (analysis.staleContent && analysis.staleContent.length > 0) {
+      html += '<div style="margin-bottom:6px;"><span data-fix-header="stale-content" style="color:#FF6F00;font-weight:bold;">Stale Content</span>';
+      html += ' <span style="color:#FF6F00;">' + analysis.staleContent.length + '</span>';
+      analysis.staleContent.slice(0, 5).forEach(function(item, idx) {
+        html += '<div style="padding-left:6px;" data-fix-item="stale-content" data-fix-idx="' + idx + '"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + ' (' + item.stalenessDays + 'd, ' + item.degree + ' conn, risk:' + item.riskScore + ')</a></div>';
+      });
+      if (analysis.staleContent.length > 5) {
+        html += '<div style="padding-left:6px;color:#666;font-size:9px;">...and ' + (analysis.staleContent.length - 5) + ' more</div>';
+      }
+      html += '</div>';
+    }
+
     // Suggestions
     if (analysis.sugestoes.length > 0) {
       html += '<div style="margin-top:6px;border-top:1px solid #333;padding-top:6px;"><span style="color:#4A9EFF;font-weight:bold;">Suggestions</span>';
@@ -1799,6 +1857,9 @@ var CognitivePanel = (function () {
       }),
       'hook-coverage': (analysis.hookCoverageMap && analysis.hookCoverageMap.uncovered || []).slice(0, 5).map(function(item) {
         return { ids: [item.event], labels: [item.event], extra: { event: item.event } };
+      }),
+      'stale-content': (analysis.staleContent || []).slice(0, 5).map(function(item) {
+        return { ids: [item.id], labels: [item.label], extra: { stalenessDays: item.stalenessDays, degree: item.degree, riskScore: item.riskScore } };
       }),
       'decision-path': (function() {
         var items = [];

@@ -18,6 +18,7 @@ import type {
   HookCoverageMap,
   QualityGateResult,
   DmlProtectionResult,
+  StaleContentAlert,
 } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -894,4 +895,92 @@ export function computeDecisionPath(
   }
 
   return { hooksWithoutSteering, steeringsWithoutHook };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stale Content Detection (Rule 20)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Options for stale content detection */
+export interface StaleContentOptions {
+  /** Minimum days without modification to consider stale (default: 90) */
+  stalenessThresholdDays?: number;
+  /** Minimum connections to consider a hub (default: 3) */
+  degreeThreshold?: number;
+  /** Current time in ms for deterministic testing (default: Date.now()) */
+  currentTimeMs?: number;
+}
+
+/**
+ * Detects steering nodes that are stale (not modified recently) AND have
+ * high connectivity (hub nodes). These represent high-risk outdated content
+ * that propagates through many paths.
+ *
+ * @param nodes - All graph nodes
+ * @param edges - All graph edges
+ * @param options - Detection thresholds and testing overrides
+ * @returns Array of stale content alerts sorted by riskScore descending
+ */
+export function detectStaleContent(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  options?: StaleContentOptions,
+): StaleContentAlert[] {
+  const stalenessThreshold = options?.stalenessThresholdDays ?? 90;
+  const degreeThreshold = options?.degreeThreshold ?? 3;
+  const now = options?.currentTimeMs ?? Date.now();
+
+  const degreeMap = buildDegreeMap(nodes, edges);
+  const alerts: StaleContentAlert[] = [];
+
+  for (const node of nodes) {
+    if (!isSteeringNode(node)) { continue; }
+    if (node.metadata?.mtime == null) { continue; }
+
+    const stalenessDays = computeStalenessDays(node.metadata.mtime, now);
+    const degree = degreeMap.get(node.id) || 0;
+
+    if (!passesThreshold(stalenessDays, stalenessThreshold, degree, degreeThreshold)) {
+      continue;
+    }
+
+    alerts.push({
+      id: node.id,
+      label: node.label,
+      stalenessDays,
+      degree,
+      riskScore: stalenessDays * degree,
+    });
+  }
+
+  return alerts.sort((a, b) => b.riskScore - a.riskScore);
+}
+
+function isSteeringNode(node: GraphNode): boolean {
+  return !!node.type && node.type.startsWith('steering-');
+}
+
+function computeStalenessDays(mtime: number, now: number): number {
+  return Math.floor((now - mtime) / (1000 * 60 * 60 * 24));
+}
+
+function buildDegreeMap(nodes: GraphNode[], edges: GraphEdge[]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const n of nodes) { map.set(n.id, 0); }
+  for (const e of edges) {
+    if (map.has(e.source)) { map.set(e.source, (map.get(e.source) || 0) + 1); }
+    if (map.has(e.target)) { map.set(e.target, (map.get(e.target) || 0) + 1); }
+  }
+  return map;
+}
+
+function passesThreshold(
+  stalenessDays: number,
+  stalenessThreshold: number,
+  degree: number,
+  degreeThreshold: number,
+): boolean {
+  const passesStale = stalenessThreshold <= 0 || stalenessDays >= stalenessThreshold;
+  const passesDegree = degreeThreshold <= 0 || degree >= degreeThreshold;
+  return passesStale && passesDegree;
 }

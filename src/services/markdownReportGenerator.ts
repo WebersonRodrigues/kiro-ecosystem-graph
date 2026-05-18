@@ -40,6 +40,7 @@ export function generateCognitiveReport(
   appendDecisionPath(lines, data);
   appendQualityGate(lines, data);
   appendDmlProtection(lines, data);
+  appendStaleContent(lines, data);
   appendRecommendations(lines, data);
   appendInstructionsForAI(lines, data);
 
@@ -73,6 +74,9 @@ function appendSummaryTable(lines: string[], data: CognitiveAnalysisResult): voi
   lines.push(`| Hook Coverage | ${data.hookCoverageMap ? data.hookCoverageMap.covered.length : 0}/10 |`);
   lines.push(`| Quality Gate Level | ${data.qualityGate ? data.qualityGate.maturityLevel : 0}/2 |`);
   lines.push(`| DML Protection Level | ${data.dmlProtection ? data.dmlProtection.maturityLevel : 0}/2 |`);
+  if (data.staleContent && data.staleContent.length > 0) {
+    lines.push(`| Stale Content | ${data.staleContent.length} |`);
+  }
   if (data.healthScore) {
     lines.push(`| **Health Score** | **${data.healthScore.score}/100** |`);
   }
@@ -390,6 +394,21 @@ function appendDmlProtection(lines: string[], data: CognitiveAnalysisResult): vo
   }
 }
 
+function appendStaleContent(lines: string[], data: CognitiveAnalysisResult): void {
+  const items = data.staleContent || [];
+  if (items.length === 0) { return; }
+  lines.push('## Stale Content');
+  lines.push('');
+  lines.push('Steerings not modified in 90+ days with high connectivity — outdated hubs propagating stale information.');
+  lines.push('');
+  lines.push('| File | Label | Days Stale | Degree | Risk Score | Tip |');
+  lines.push('|------|-------|-----------|--------|-----------|-----|');
+  for (const item of items) {
+    lines.push(`| \`${item.id}\` | ${item.label} | ${item.stalenessDays} | ${item.degree} | ${item.riskScore} | Review and update this high-connectivity steering to ensure accuracy |`);
+  }
+  lines.push('');
+}
+
 function appendRecommendations(lines: string[], data: CognitiveAnalysisResult): void {
   if (data.sugestoes.length === 0) { return; }
   lines.push('## Recommendations');
@@ -458,6 +477,9 @@ function appendInstructionsForAI(lines: string[], data: CognitiveAnalysisResult)
   }
   if (data.dmlProtection && data.dmlProtection.maturityLevel < 2) {
     lines.push(`${step++}. For DML Protection, add missing components to reach level 2.`);
+  }
+  if ((data.staleContent || []).length > 0) {
+    lines.push(`${step++}. For each Stale Content steering, review and update the content to reflect current practices.`);
   }
 
   lines.push('');

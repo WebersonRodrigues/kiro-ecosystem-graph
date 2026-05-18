@@ -387,6 +387,27 @@ export interface CognitiveAnalysisResult {
 
   /** Unified health score computed from all cognitive rules */
   healthScore?: UnifiedHealthScore;
+
+  /** Steerings flagged as stale content with high connectivity (Rule 20) */
+  staleContent?: StaleContentAlert[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stale Content Detection Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A steering flagged as stale content with high connectivity */
+export interface StaleContentAlert {
+  /** Node ID (relative path) */
+  id: string;
+  /** Display label */
+  label: string;
+  /** Days since last modification */
+  stalenessDays: number;
+  /** Total connections (incoming + outgoing) */
+  degree: number;
+  /** Risk score: stalenessDays × degree */
+  riskScore: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
