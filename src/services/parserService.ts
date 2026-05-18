@@ -1,8 +1,11 @@
 import * as path from 'path';
+
 import type { SteeringFile, EcosystemFile, ParseResult, Reference, GraphNode, NodeType } from '../types';
+import type { ContentMetrics } from './contentAnalyzer';
 import { NodeClassifier } from './nodeClassifier';
 import { PathResolver } from './pathResolver';
 import { analyzeContent } from './contentAnalyzer';
+import { ContentAnalysisCache, computeContentHash } from './contentAnalysisCache';
 
 /**
  * Determines whether a target path refers to an ecosystem-relevant file.
@@ -53,14 +56,24 @@ const PATTERNS = {
 export class ParserService {
   private readonly nodeClassifier: NodeClassifier;
   private readonly pathResolver: PathResolver;
+  private readonly contentCache: ContentAnalysisCache;
 
   /**
    * @param nodeClassifier - Service for classifying nodes by filename prefix
    * @param pathResolver - Service for resolving relative paths across workspace folders
+   * @param contentCache - Optional cache for content analysis results (LRU, keyed by content hash)
    */
-  constructor(nodeClassifier: NodeClassifier, pathResolver: PathResolver) {
+  constructor(nodeClassifier: NodeClassifier, pathResolver: PathResolver, contentCache?: ContentAnalysisCache) {
     this.nodeClassifier = nodeClassifier;
     this.pathResolver = pathResolver;
+    this.contentCache = contentCache ?? new ContentAnalysisCache();
+  }
+
+  /**
+   * Returns the content analysis cache instance (for external invalidation).
+   */
+  getContentCache(): ContentAnalysisCache {
+    return this.contentCache;
   }
 
   /**
@@ -95,8 +108,8 @@ export class ParserService {
       metadata: metadata.inclusion ? { inclusion: metadata.inclusion } : undefined,
     };
 
-    // Enrich metadata with content analysis metrics
-    const metrics = analyzeContent(content);
+    // Enrich metadata with content analysis metrics (cache-optimized)
+    const metrics = this.getCachedMetrics(content, file.relativePath);
     node.metadata = {
       ...node.metadata,
       keywords: metrics.keywords,
@@ -377,6 +390,21 @@ export class ParserService {
 
     // Plain substring match as fallback
     return filePath.includes(pattern);
+  }
+
+  /**
+   * Returns content metrics from cache if available, otherwise computes and caches.
+   */
+  private getCachedMetrics(content: string, filePath: string): ContentMetrics {
+    const hash = computeContentHash(content);
+    const cached = this.contentCache.get(hash);
+    if (cached) {
+      return cached;
+    }
+    const metrics = analyzeContent(content);
+    this.contentCache.set(hash, metrics);
+    this.contentCache.registerPath(filePath, hash);
+    return metrics;
   }
 
   /**

@@ -6,6 +6,7 @@ import { GraphDataStore } from './services/graphDataStore';
 import { PathResolver } from './services/pathResolver';
 import { AnnotationService } from './services/annotationService';
 import { SnapshotService } from './services/snapshotService';
+import { ContentAnalysisCache } from './services/contentAnalysisCache';
 import { EcosystemGraphProvider } from './webview/webviewProvider';
 import { FileChangeEvent, EcosystemFile, ParseResult } from './types';
 
@@ -17,7 +18,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const pathResolver = new PathResolver();
   const nodeClassifier = new NodeClassifier();
-  const parserService = new ParserService(nodeClassifier, pathResolver);
+  const contentCache = new ContentAnalysisCache();
+  const parserService = new ParserService(nodeClassifier, pathResolver, contentCache);
   const graphDataStore = new GraphDataStore(nodeClassifier);
   const fileDiscoveryService = new FileDiscoveryService();
   const annotationService = new AnnotationService(workspaceFolders[0].uri);
@@ -292,8 +294,14 @@ async function handleFileChange(
   snapshotService: SnapshotService
 ): Promise<void> {
   if (event.type === 'deleted') {
+    // Invalidate cache entry for deleted file
+    parserService.getContentCache().invalidateByPath(event.file.relativePath);
     graphDataStore.removeFile(event.file.relativePath);
   } else {
+    // Invalidate cache entry for changed file (will be re-computed during parse)
+    if (event.type === 'changed') {
+      parserService.getContentCache().invalidateByPath(event.file.relativePath);
+    }
     try {
       const files = await discoveryService.discoverAll();
 
