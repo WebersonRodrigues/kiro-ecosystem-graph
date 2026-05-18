@@ -716,3 +716,66 @@ describe('MarkdownReportGenerator', function () {
       assert.ok(report.includes('This is an improvement suggestion, not a problem. It does not affect the Health Score.'));
     });
   });
+
+  describe('Conflict Resolution Priority section', function () {
+    it('generates section with priority statements present', function () {
+      const data = createMinimalResult();
+      data.conflictResolution = {
+        hasPriorityDefined: true,
+        priorityStatements: [
+          { steeringId: 'security.md', text: 'In case of conflict, security takes priority.' },
+          { steeringId: 'conventions.md', text: 'This has precedence over other rules.' },
+        ],
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('## Conflict Resolution Priority'));
+      assert.ok(report.includes('| security.md | In case of conflict, security takes priority. |'));
+      assert.ok(report.includes('| conventions.md | This has precedence over other rules. |'));
+      assert.ok(report.includes('Priority hierarchy defined:'));
+    });
+
+    it('generates section with suggestion present (no priority statements)', function () {
+      const data = createMinimalResult();
+      data.conflictResolution = {
+        hasPriorityDefined: false,
+        priorityStatements: [],
+        suggestion: 'Consider defining a priority hierarchy between steerings.',
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('## Conflict Resolution Priority'));
+      assert.ok(report.includes('Consider defining a priority hierarchy'));
+      assert.ok(!report.includes('Priority hierarchy defined:'));
+    });
+
+    it('omits section when conflictResolution is undefined', function () {
+      const data = createMinimalResult();
+      const report = generateCognitiveReport(data);
+      assert.ok(!report.includes('## Conflict Resolution Priority'));
+    });
+
+    it('omits section when no statements and no suggestion', function () {
+      const data = createMinimalResult();
+      data.conflictResolution = {
+        hasPriorityDefined: false,
+        priorityStatements: [],
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(!report.includes('## Conflict Resolution Priority'));
+    });
+
+    it('informational note is present in header', function () {
+      const data = createMinimalResult();
+      data.conflictResolution = {
+        hasPriorityDefined: true,
+        priorityStatements: [
+          { steeringId: 'a.md', text: 'This has priority.' },
+        ],
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('This is an improvement suggestion, not a problem. It does not affect the Health Score.'));
+    });
+  });

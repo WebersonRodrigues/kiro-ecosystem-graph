@@ -699,3 +699,56 @@ Total: 32500 tokens (16% de 200000 budget)  →  SUGESTÃO gerada
 2. Use linguagem forte (NEVER, FORBIDDEN, MUST NOT) para regras críticas ao invés de linguagem fraca (should, try)
 3. Repita regras críticas em 2+ steerings para redundância
 4. Crie hooks preToolUse para operações destrutivas (delete, drop, truncate)
+
+---
+
+### 27. Conflict Resolution Priority (Sugestões de Melhoria)
+
+**O que verifica:** Se o ecossistema define uma hierarquia de prioridade entre steerings para quando contradições ocorrem. Escaneia steerings always-loaded por padrões de linguagem de prioridade que indicam que um steering tem precedência sobre outro.
+
+**Por que importa:** Quando múltiplos steerings always-loaded contêm regras conflitantes (detectadas pela Regra 14 — Contradições), o agente recebe instruções opostas simultaneamente. Sem uma hierarquia de prioridade explícita, o comportamento do agente se torna imprevisível — às vezes seguindo uma regra, às vezes outra. Uma declaração clara de prioridade (ex: "Em caso de conflito, security-policies tem prioridade sobre code-conventions") dá ao agente um caminho de resolução determinístico.
+
+**Padrões de Linguagem de Prioridade Detectados:**
+- Inglês: "priority", "precedence", "overrides", "takes priority", "in case of conflict", "higher priority", "lower priority", "has priority over"
+- Português: "prioridade", "prevalece", "em caso de conflito", "tem prioridade sobre", "sobrepõe", "precedência"
+
+**Algoritmo:**
+1. Filtrar nós para steerings always-loaded (alwaysApply=true OU autoInclusion=true)
+2. Para cada steering, extrair todas as linhas de conteúdo (metadata.content ou imperativeLines)
+3. Para cada linha, verificar se algum padrão de linguagem de prioridade aparece (case-insensitive)
+4. Se pelo menos um match encontrado: hasPriorityDefined=true, coletar todos os statements
+5. Determinar relevância: contradictionCount > 0 OU alwaysLoadedCount >= 3
+6. Gerar sugestão apenas quando: hasPriorityDefined=false E contexto é relevante
+
+**Exemplo (prioridade definida):**
+```
+security-policies.md (alwaysApply: true)
+  Linha: "Em caso de conflito, regras de segurança têm prioridade sobre convenções de código."
+  → PRIORIDADE DEFINIDA (hasPriorityDefined=true)
+  → Nenhuma sugestão gerada
+```
+
+**Exemplo (prioridade não definida, contexto relevante):**
+```
+3 steerings always-loaded, 1 contradição detectada
+Nenhuma linguagem de prioridade encontrada em nenhum steering
+  → hasPriorityDefined=false
+  → Sugestão: "Considere definir uma hierarquia de prioridade entre steerings..."
+```
+
+**Exemplo (não relevante):**
+```
+2 steerings always-loaded, 0 contradições
+  → Não relevante (< 3 steerings E sem contradições)
+  → Nenhuma sugestão gerada independente do status de prioridade
+```
+
+**Importante:** Esta regra produz apenas SUGESTÕES, não erros. Os resultados NÃO afetam o Health Score.
+
+**Impacto:** Sem uma hierarquia de prioridade, contradições entre steerings levam a comportamento imprevisível do agente. Com prioridade explícita, o agente tem um caminho de resolução determinístico.
+
+**Como melhorar:**
+- Adicione uma declaração de prioridade ao seu steering principal: "Em caso de conflito, este steering tem prioridade sobre [outro-steering]."
+- Defina uma hierarquia clara: segurança > convenções > estilo
+- Use linguagem explícita: "tem prioridade sobre", "prevalece", "sobrepõe"
+

@@ -1780,3 +1780,176 @@ describe('CognitiveValidations — analyzeJailbreakProtection()', function () {
     });
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Conflict Resolution Priority (Rule 27)
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { analyzeConflictResolution, PRIORITY_LANGUAGE_PATTERNS } from '../../services/cognitiveValidations';
+
+describe('CognitiveValidations — analyzeConflictResolution()', function () {
+  it('detects "in case of conflict" as priority language', function () {
+    const nodes: GraphNode[] = [
+      makeNode('policy.md', {
+        type: 'steering-policy',
+        metadata: { alwaysApply: true, content: 'In case of conflict, security takes priority.' },
+      }),
+    ];
+    const result = analyzeConflictResolution(nodes, 1);
+    assert.strictEqual(result.hasPriorityDefined, true);
+    assert.strictEqual(result.priorityStatements.length, 1);
+  });
+
+  it('detects "prioridade" as priority language (PT-BR)', function () {
+    const nodes: GraphNode[] = [
+      makeNode('regras.md', {
+        type: 'steering-domain',
+        metadata: { alwaysApply: true, content: 'Este steering tem prioridade sobre os demais.' },
+      }),
+    ];
+    const result = analyzeConflictResolution(nodes, 0);
+    assert.strictEqual(result.hasPriorityDefined, true);
+  });
+
+  it('detects "takes priority" as priority language', function () {
+    const nodes: GraphNode[] = [
+      makeNode('security.md', {
+        type: 'steering-policy',
+        metadata: { alwaysApply: true, content: 'Security takes priority over convenience.' },
+      }),
+    ];
+    const result = analyzeConflictResolution(nodes, 0);
+    assert.strictEqual(result.hasPriorityDefined, true);
+  });
+
+  it('returns hasPriorityDefined=false when no priority language found', function () {
+    const nodes: GraphNode[] = [
+      makeNode('generic.md', {
+        type: 'steering-domain',
+        metadata: { alwaysApply: true, content: 'Use TypeScript strict mode.\nAlways write tests.' },
+      }),
+    ];
+    const result = analyzeConflictResolution(nodes, 0);
+    assert.strictEqual(result.hasPriorityDefined, false);
+    assert.strictEqual(result.priorityStatements.length, 0);
+  });
+
+  it('extracts correct steeringId and text', function () {
+    const nodes: GraphNode[] = [
+      makeNode('conventions.md', {
+        type: 'steering-domain',
+        metadata: { alwaysApply: true, content: 'Line 1\nThis has precedence over other rules.\nLine 3' },
+      }),
+    ];
+    const result = analyzeConflictResolution(nodes, 1);
+    assert.strictEqual(result.priorityStatements[0].steeringId, 'conventions.md');
+    assert.strictEqual(result.priorityStatements[0].text, 'This has precedence over other rules.');
+  });
+
+  it('performs case-insensitive matching', function () {
+    const nodes: GraphNode[] = [
+      makeNode('upper.md', {
+        type: 'steering-policy',
+        metadata: { alwaysApply: true, content: 'PRIORITY is given to security rules.' },
+      }),
+    ];
+    const result = analyzeConflictResolution(nodes, 1);
+    assert.strictEqual(result.hasPriorityDefined, true);
+  });
+
+  it('relevance: contradictions=1, alwaysLoaded=1 → relevant (suggestion when no priority)', function () {
+    const nodes: GraphNode[] = [
+      makeNode('a.md', {
+        type: 'steering-domain',
+        metadata: { alwaysApply: true, content: 'Use TypeScript.' },
+      }),
+    ];
+    const result = analyzeConflictResolution(nodes, 1);
+    assert.strictEqual(result.hasPriorityDefined, false);
+    assert.ok(result.suggestion !== undefined);
+  });
+
+  it('relevance: contradictions=0, alwaysLoaded=3 → relevant (suggestion when no priority)', function () {
+    const nodes: GraphNode[] = [
+      makeNode('a.md', { type: 'steering-domain', metadata: { alwaysApply: true, content: 'A' } }),
+      makeNode('b.md', { type: 'steering-domain', metadata: { alwaysApply: true, content: 'B' } }),
+      makeNode('c.md', { type: 'steering-domain', metadata: { alwaysApply: true, content: 'C' } }),
+    ];
+    const result = analyzeConflictResolution(nodes, 0);
+    assert.strictEqual(result.hasPriorityDefined, false);
+    assert.ok(result.suggestion !== undefined);
+  });
+
+  it('relevance: contradictions=0, alwaysLoaded=2 → not relevant (no suggestion)', function () {
+    const nodes: GraphNode[] = [
+      makeNode('a.md', { type: 'steering-domain', metadata: { alwaysApply: true, content: 'A' } }),
+      makeNode('b.md', { type: 'steering-domain', metadata: { alwaysApply: true, content: 'B' } }),
+    ];
+    const result = analyzeConflictResolution(nodes, 0);
+    assert.strictEqual(result.hasPriorityDefined, false);
+    assert.strictEqual(result.suggestion, undefined);
+  });
+
+  it('suggestion NOT generated when hasPriorityDefined=true', function () {
+    const nodes: GraphNode[] = [
+      makeNode('a.md', { type: 'steering-domain', metadata: { alwaysApply: true, content: 'This has priority over B.' } }),
+      makeNode('b.md', { type: 'steering-domain', metadata: { alwaysApply: true, content: 'B content' } }),
+      makeNode('c.md', { type: 'steering-domain', metadata: { alwaysApply: true, content: 'C content' } }),
+    ];
+    const result = analyzeConflictResolution(nodes, 1);
+    assert.strictEqual(result.hasPriorityDefined, true);
+    assert.strictEqual(result.suggestion, undefined);
+  });
+
+  it('empty graph returns hasPriorityDefined=false, empty statements, no suggestion', function () {
+    const result = analyzeConflictResolution([], 0);
+    assert.strictEqual(result.hasPriorityDefined, false);
+    assert.strictEqual(result.priorityStatements.length, 0);
+    assert.strictEqual(result.suggestion, undefined);
+  });
+
+  it('non-steering nodes are ignored', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook.json', { type: 'hook-auto', metadata: { alwaysApply: true, content: 'priority override' } }),
+      makeNode('code.ts', { type: 'code-file', metadata: { alwaysApply: true, content: 'has priority over' } }),
+    ];
+    const result = analyzeConflictResolution(nodes, 1);
+    assert.strictEqual(result.hasPriorityDefined, false);
+  });
+
+  it('steerings without alwaysApply/autoInclusion are ignored', function () {
+    const nodes: GraphNode[] = [
+      makeNode('manual.md', { type: 'steering-domain', metadata: { content: 'This has priority over all.' } }),
+    ];
+    const result = analyzeConflictResolution(nodes, 1);
+    assert.strictEqual(result.hasPriorityDefined, false);
+  });
+
+  it('defaults contradictionCount to 0 when not provided', function () {
+    const nodes: GraphNode[] = [
+      makeNode('a.md', { type: 'steering-domain', metadata: { alwaysApply: true, content: 'A' } }),
+      makeNode('b.md', { type: 'steering-domain', metadata: { alwaysApply: true, content: 'B' } }),
+    ];
+    // Not providing contradictionCount — should default to 0
+    // With 2 always-loaded and 0 contradictions → not relevant → no suggestion
+    const result = analyzeConflictResolution(nodes);
+    assert.strictEqual(result.suggestion, undefined);
+  });
+
+  it('uses imperativeLines as fallback when content is not available', function () {
+    const nodes: GraphNode[] = [
+      makeNode('fallback.md', {
+        type: 'steering-domain',
+        metadata: {
+          alwaysApply: true,
+          imperativeLines: [
+            { text: 'In case of conflict, follow security rules', pattern: 'always', subject: 'security' },
+          ],
+        },
+      }),
+    ];
+    const result = analyzeConflictResolution(nodes, 1);
+    assert.strictEqual(result.hasPriorityDefined, true);
+    assert.strictEqual(result.priorityStatements[0].text, 'In case of conflict, follow security rules');
+  });
+});

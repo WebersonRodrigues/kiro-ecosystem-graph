@@ -699,3 +699,56 @@ Total: 32500 tokens (16% of 200000 budget)  →  SUGGESTION generated
 - Split large always-loaded steerings into smaller focused files
 - Remove redundant content from always-loaded steerings
 - Use the per-steering breakdown to identify the largest consumers
+
+---
+
+### 27. Conflict Resolution Priority (Improvement Suggestions)
+
+**What it checks:** Whether the ecosystem defines a priority hierarchy between steerings for when contradictions occur. Scans always-loaded steerings for priority language patterns that indicate one steering takes precedence over another.
+
+**Why it matters:** When multiple always-loaded steerings contain conflicting rules (detected by Rule 14 — Contradictions), the agent receives opposing instructions simultaneously. Without an explicit priority hierarchy, the agent's behavior becomes unpredictable — sometimes following one rule, sometimes the other. A clear priority statement (e.g., "In case of conflict, security-policies takes priority over code-conventions") gives the agent a deterministic resolution path.
+
+**Priority Language Patterns Detected:**
+- English: "priority", "precedence", "overrides", "takes priority", "in case of conflict", "higher priority", "lower priority", "has priority over"
+- Portuguese: "prioridade", "prevalece", "em caso de conflito", "tem prioridade sobre", "sobrepõe", "precedência"
+
+**Algorithm:**
+1. Filter nodes to always-loaded steerings (alwaysApply=true OR autoInclusion=true)
+2. For each steering, extract all content lines (metadata.content or imperativeLines)
+3. For each line, check if any priority language pattern appears (case-insensitive)
+4. If at least one match found: hasPriorityDefined=true, collect all matching statements
+5. Determine relevance: contradictionCount > 0 OR alwaysLoadedCount >= 3
+6. Generate suggestion only when: hasPriorityDefined=false AND context is relevant
+
+**Example (priority defined):**
+```
+security-policies.md (alwaysApply: true)
+  Line: "In case of conflict, security rules take priority over code conventions."
+  → PRIORITY DEFINED (hasPriorityDefined=true)
+  → No suggestion generated
+```
+
+**Example (priority not defined, relevant context):**
+```
+3 always-loaded steerings, 1 contradiction detected
+No priority language found in any steering
+  → hasPriorityDefined=false
+  → Suggestion: "Consider defining a priority hierarchy between steerings..."
+```
+
+**Example (not relevant):**
+```
+2 always-loaded steerings, 0 contradictions
+  → Not relevant (< 3 steerings AND no contradictions)
+  → No suggestion generated regardless of priority status
+```
+
+**Important:** This rule produces SUGGESTIONS only, not errors. Results do NOT affect the Health Score.
+
+**Impact:** Without a priority hierarchy, contradictions between steerings lead to unpredictable agent behavior. With explicit priority, the agent has a deterministic resolution path.
+
+**How to improve:**
+- Add a priority statement to your main steering: "In case of conflict, this steering takes priority over [other-steering]."
+- Define a clear hierarchy: security > conventions > style
+- Use explicit language: "has priority over", "takes precedence", "overrides"
+

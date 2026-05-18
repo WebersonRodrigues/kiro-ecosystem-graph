@@ -1445,6 +1445,51 @@ var CognitivePanel = (function () {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Conflict Resolution Priority (Rule 27)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  var PRIORITY_LANGUAGE_PATTERNS_WV = [
+    'priority', 'precedence', 'overrides', 'takes priority',
+    'in case of conflict', 'higher priority', 'lower priority',
+    'has priority over', 'prioridade', 'prevalece',
+    'em caso de conflito', 'tem prioridade sobre', 'sobrepõe', 'precedência',
+  ];
+
+  function getAllContentLinesWebview(node) {
+    var meta = node.metadata || {};
+    if (meta.content) { return meta.content.split('\n'); }
+    if (meta.imperativeLines && meta.imperativeLines.length > 0) {
+      return meta.imperativeLines.map(function(l) { return l.text; });
+    }
+    return [];
+  }
+
+  function analyzeConflictResolutionWebview(nodes, contradictionCount) {
+    var effectiveContradictions = contradictionCount || 0;
+    var alwaysSteerings = nodes.filter(isAlwaysLoadedSteeringWebview);
+    var alwaysLoadedCount = alwaysSteerings.length;
+    var statements = [];
+    for (var i = 0; i < alwaysSteerings.length; i++) {
+      var lines = getAllContentLinesWebview(alwaysSteerings[i]);
+      for (var j = 0; j < lines.length; j++) {
+        var lowerLine = lines[j].toLowerCase();
+        for (var k = 0; k < PRIORITY_LANGUAGE_PATTERNS_WV.length; k++) {
+          if (lowerLine.indexOf(PRIORITY_LANGUAGE_PATTERNS_WV[k]) !== -1) {
+            statements.push({ steeringId: alwaysSteerings[i].id, text: lines[j].trim() });
+            break;
+          }
+        }
+      }
+    }
+    var hasPriorityDefined = statements.length > 0;
+    var isRelevant = effectiveContradictions > 0 || alwaysLoadedCount >= 3;
+    var suggestion = (!hasPriorityDefined && isRelevant)
+      ? 'Consider defining a priority hierarchy between steerings to resolve potential contradictions. Example: "In case of conflict, security-policies takes priority over code-conventions."'
+      : undefined;
+    return { hasPriorityDefined: hasPriorityDefined, priorityStatements: statements, suggestion: suggestion };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Health Score Computation
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -1748,6 +1793,9 @@ var CognitivePanel = (function () {
     // 19. Jailbreak Protection (Rule 26)
     var jailbreakProtection = analyzeJailbreakProtectionWebview(data.nodes);
 
+    // 20. Conflict Resolution Priority (Rule 27)
+    var conflictResolution = analyzeConflictResolutionWebview(data.nodes, contradictions.length);
+
     // 11. Cross-Workspace Topology: group external nodes by workspace
     var crossWorkspaceTopology = [];
     var workspaceGroups = {};
@@ -1852,6 +1900,7 @@ var CognitivePanel = (function () {
       instructionSpecificity: instructionSpecificity,
       contextBudget: contextBudget,
       jailbreakProtection: jailbreakProtection,
+      conflictResolution: conflictResolution,
       healthScore: computeHealthScore({
         steeringsSoltos: steeringsSoltos,
         vinculosFrageis: vinculosFrageis,
@@ -2554,6 +2603,24 @@ var CognitivePanel = (function () {
         jp.suggestions.forEach(function(s) {
           html += '<div style="padding-left:6px;color:#90A4AE;font-size:8px;margin-top:1px;">\uD83D\uDCA1 ' + escapeHtml(s) + '</div>';
         });
+      }
+      html += '</div>';
+    }
+
+    // Conflict Resolution Priority (Rule 27)
+    if (analysis.conflictResolution && (analysis.conflictResolution.priorityStatements.length > 0 || analysis.conflictResolution.suggestion)) {
+      html += '<div style="margin-bottom:6px;border-top:1px solid #333;padding-top:6px;">';
+      html += '<span style="color:#90A4AE;font-weight:bold;">\u2696\uFE0F Conflict Resolution</span>';
+      if (analysis.conflictResolution.hasPriorityDefined) {
+        html += ' <span style="color:#4CAF50;">Defined</span>';
+        analysis.conflictResolution.priorityStatements.slice(0, 5).forEach(function(stmt) {
+          html += '<div style="padding-left:6px;color:#78909C;font-size:8px;">\u2022 ' + escapeHtml(stmt.text) + ' <span style="color:#555;">(' + escapeHtml(stmt.steeringId) + ')</span></div>';
+        });
+        if (analysis.conflictResolution.priorityStatements.length > 5) {
+          html += '<div style="padding-left:6px;color:#666;font-size:8px;">...and ' + (analysis.conflictResolution.priorityStatements.length - 5) + ' more</div>';
+        }
+      } else if (analysis.conflictResolution.suggestion) {
+        html += '<div style="padding-left:6px;color:#90A4AE;font-size:8px;margin-top:2px;">\uD83D\uDCA1 ' + escapeHtml(analysis.conflictResolution.suggestion) + '</div>';
       }
       html += '</div>';
     }

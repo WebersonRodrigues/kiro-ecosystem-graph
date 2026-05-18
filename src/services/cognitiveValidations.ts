@@ -30,6 +30,8 @@ import type {
   ContextBudgetResult,
   ContextBudgetSteeringEntry,
   JailbreakProtectionResult,
+  PriorityStatement,
+  ConflictResolutionResult,
 } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2081,4 +2083,102 @@ export function analyzeJailbreakProtection(
     destructiveHookCount,
     suggestions,
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Conflict Resolution Priority (Rule 27)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Priority language patterns for EN and PT-BR */
+export const PRIORITY_LANGUAGE_PATTERNS: string[] = [
+  'priority',
+  'precedence',
+  'overrides',
+  'takes priority',
+  'in case of conflict',
+  'higher priority',
+  'lower priority',
+  'has priority over',
+  'prioridade',
+  'prevalece',
+  'em caso de conflito',
+  'tem prioridade sobre',
+  'sobrepõe',
+  'precedência',
+];
+
+/**
+ * Extracts all content lines from a graph node.
+ * Priority: metadata.content → imperativeLines → empty array.
+ */
+function getAllContentLines(node: GraphNode): string[] {
+  if (node.metadata?.content) {
+    return node.metadata.content.split('\n');
+  }
+  if (node.metadata?.imperativeLines && node.metadata.imperativeLines.length > 0) {
+    return node.metadata.imperativeLines.map((l) => l.text);
+  }
+  return [];
+}
+
+/**
+ * Scans always-loaded steerings for priority language patterns.
+ * Returns array of priority statements with source steering id and text.
+ */
+function detectPriorityStatements(nodes: GraphNode[]): PriorityStatement[] {
+  const statements: PriorityStatement[] = [];
+  const alwaysSteerings = nodes.filter(isAlwaysLoadedSteering);
+
+  for (const steering of alwaysSteerings) {
+    const lines = getAllContentLines(steering);
+    for (const line of lines) {
+      const lowerLine = line.toLowerCase();
+      const hasPattern = PRIORITY_LANGUAGE_PATTERNS.some(
+        (pattern) => lowerLine.includes(pattern),
+      );
+      if (hasPattern) {
+        statements.push({ steeringId: steering.id, text: line.trim() });
+      }
+    }
+  }
+
+  return statements;
+}
+
+/**
+ * Determines if conflict resolution analysis is relevant.
+ * Relevant when contradictions exist OR 3+ always-loaded steerings.
+ */
+function isConflictResolutionRelevant(
+  contradictionCount: number,
+  alwaysLoadedCount: number,
+): boolean {
+  return contradictionCount > 0 || alwaysLoadedCount >= 3;
+}
+
+/**
+ * Analyzes conflict resolution priority across the ecosystem.
+ * Returns whether priority hierarchy is defined, statements found,
+ * and an optional suggestion when relevant but undefined.
+ */
+export function analyzeConflictResolution(
+  nodes: GraphNode[],
+  contradictionCount?: number,
+): ConflictResolutionResult {
+  const effectiveContradictions = contradictionCount ?? 0;
+  const alwaysSteerings = nodes.filter(isAlwaysLoadedSteering);
+  const alwaysLoadedCount = alwaysSteerings.length;
+
+  const priorityStatements = detectPriorityStatements(nodes);
+  const hasPriorityDefined = priorityStatements.length > 0;
+
+  const isRelevant = isConflictResolutionRelevant(
+    effectiveContradictions, alwaysLoadedCount,
+  );
+
+  const suggestion = (!hasPriorityDefined && isRelevant)
+    ? 'Consider defining a priority hierarchy between steerings to resolve potential contradictions. Example: "In case of conflict, security-policies takes priority over code-conventions."'
+    : undefined;
+
+  return { hasPriorityDefined, priorityStatements, suggestion };
 }

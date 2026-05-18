@@ -422,6 +422,9 @@ export interface CognitiveAnalysisResult {
 
   /** Jailbreak/bypass protection analysis — improvement suggestions (Rule 26) */
   jailbreakProtection?: JailbreakProtectionResult;
+
+  /** Conflict resolution priority analysis — improvement suggestions (Rule 27) */
+  conflictResolution?: ConflictResolutionResult;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -924,6 +927,28 @@ export interface JailbreakProtectionResult {
   destructiveHookCount: number;
   /** Improvement suggestions (empty when maturityLevel=2) */
   suggestions: string[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Conflict Resolution Priority Types (Rule 27)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A priority statement found in a steering */
+export interface PriorityStatement {
+  /** Id of the steering containing the priority statement */
+  steeringId: string;
+  /** Full text of the line containing priority language */
+  text: string;
+}
+
+/** Conflict resolution priority analysis result */
+export interface ConflictResolutionResult {
+  /** Whether at least one priority hierarchy is defined */
+  hasPriorityDefined: boolean;
+  /** Priority statements found across steerings */
+  priorityStatements: PriorityStatement[];
+  /** Suggestion text (only when priority not defined and context is relevant) */
+  suggestion?: string;
 }
 
 /** Complete context budget estimation result */

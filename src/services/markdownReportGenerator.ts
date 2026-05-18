@@ -48,6 +48,7 @@ export function generateCognitiveReport(
   appendInstructionSpecificity(lines, data);
   appendContextBudget(lines, data);
   appendJailbreakProtection(lines, data);
+  appendConflictResolution(lines, data);
   appendRecommendations(lines, data);
   appendInstructionsForAI(lines, data);
 
@@ -579,6 +580,33 @@ function appendJailbreakProtection(lines: string[], data: CognitiveAnalysisResul
   }
 }
 
+function appendConflictResolution(lines: string[], data: CognitiveAnalysisResult): void {
+  const cr = data.conflictResolution;
+  if (!cr) { return; }
+  if (cr.priorityStatements.length === 0 && !cr.suggestion) { return; }
+
+  lines.push('## Conflict Resolution Priority');
+  lines.push('');
+  lines.push('> This is an improvement suggestion, not a problem. It does not affect the Health Score.');
+  lines.push('');
+
+  if (cr.priorityStatements.length > 0) {
+    lines.push('Priority hierarchy defined:');
+    lines.push('');
+    lines.push('| Steering | Statement |');
+    lines.push('|----------|-----------|');
+    for (const stmt of cr.priorityStatements) {
+      lines.push(`| ${stmt.steeringId} | ${stmt.text} |`);
+    }
+    lines.push('');
+  }
+
+  if (cr.suggestion) {
+    lines.push(`> ${cr.suggestion}`);
+    lines.push('');
+  }
+}
+
 function appendRecommendations(lines: string[], data: CognitiveAnalysisResult): void {
   if (data.sugestoes.length === 0) { return; }
   lines.push('## Recommendations');
@@ -673,6 +701,9 @@ function appendInstructionsForAI(lines: string[], data: CognitiveAnalysisResult)
   }
   if (data.jailbreakProtection && data.jailbreakProtection.maturityLevel < 2) {
     lines.push(`${step++}. Consider implementing Jailbreak Protection suggestions to strengthen ecosystem resilience against bypass attempts.`);
+  }
+  if (data.conflictResolution && data.conflictResolution.suggestion) {
+    lines.push(`${step++}. Consider defining a priority hierarchy between steerings to resolve potential contradictions (Conflict Resolution suggestion).`);
   }
 
   lines.push('');
