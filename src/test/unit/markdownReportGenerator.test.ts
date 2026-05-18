@@ -657,3 +657,62 @@ describe('MarkdownReportGenerator', function () {
       assert.ok(report.includes('Consider reviewing always-loaded steerings'));
     });
   });
+
+
+  describe('Jailbreak Protection section', function () {
+    it('generates section with valid data', function () {
+      const data = createMinimalResult();
+      data.jailbreakProtection = {
+        maturityLevel: 1,
+        hasIdentityLock: true,
+        strongRuleCount: 5,
+        redundantRuleCount: 0,
+        destructiveHookCount: 0,
+        suggestions: ['Consider adding preToolUse hooks for destructive operations.'],
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('## Jailbreak Protection Level'));
+      assert.ok(report.includes('**Maturity Level: 1/2 (Basic)**'));
+      assert.ok(report.includes('Identity Lock'));
+      assert.ok(report.includes('\u2713 Present'));
+      assert.ok(report.includes('Consider adding preToolUse hooks'));
+    });
+
+    it('omits section when jailbreakProtection is undefined', function () {
+      const data = createMinimalResult();
+      const report = generateCognitiveReport(data);
+      assert.ok(!report.includes('## Jailbreak Protection Level'));
+    });
+
+    it('shows congratulatory message when maturityLevel === 2', function () {
+      const data = createMinimalResult();
+      data.jailbreakProtection = {
+        maturityLevel: 2,
+        hasIdentityLock: true,
+        strongRuleCount: 5,
+        redundantRuleCount: 2,
+        destructiveHookCount: 1,
+        suggestions: [],
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('Congratulations'));
+      assert.ok(report.includes('reinforced jailbreak protection'));
+    });
+
+    it('informational note is present in header', function () {
+      const data = createMinimalResult();
+      data.jailbreakProtection = {
+        maturityLevel: 0,
+        hasIdentityLock: false,
+        strongRuleCount: 0,
+        redundantRuleCount: 0,
+        destructiveHookCount: 0,
+        suggestions: ['Consider adding identity lock statements.'],
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('This is an improvement suggestion, not a problem. It does not affect the Health Score.'));
+    });
+  });

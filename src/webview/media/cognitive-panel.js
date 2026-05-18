@@ -1312,6 +1312,139 @@ var CognitivePanel = (function () {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Jailbreak Protection (Rule 26)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  var IDENTITY_LOCK_PATTERNS_WV = [
+    'i am kiro', 'my identity', 'never change persona',
+    'do not impersonate', 'you are kiro',
+  ];
+
+  var STRONG_LANGUAGE_PATTERNS_WV = ['NEVER', 'FORBIDDEN', 'MUST NOT', 'DO NOT', 'ABSOLUTELY'];
+
+  var DESTRUCTIVE_TOOL_PATTERNS_WV = ['delete', 'remove', 'drop', 'destroy', 'truncate', 'force'];
+
+  var STOP_WORDS_WV = { 'the': 1, 'a': 1, 'an': 1, 'is': 1, 'are': 1, 'to': 1, 'for': 1, 'of': 1, 'in': 1, 'on': 1, 'with': 1, 'and': 1, 'or': 1, 'that': 1, 'this': 1, 'it': 1, 'be': 1 };
+
+  function analyzeJailbreakProtectionWebview(nodes) {
+    var hasIdentityLock = detectIdentityLockWebview(nodes);
+    var strongRuleCount = countStrongLanguageWebview(nodes);
+    var redundantRuleCount = countRedundantRulesWebview(nodes);
+    var destructiveHookCount = countDestructiveHooksWebview(nodes);
+    var hasAbsoluteRules = hasIdentityLock || strongRuleCount >= 3;
+    var hasBlockingHooks = destructiveHookCount >= 1;
+    var hasRedundancy = redundantRuleCount >= 1;
+    var maturityLevel = (hasAbsoluteRules && hasBlockingHooks && hasRedundancy) ? 2 :
+      (hasAbsoluteRules || hasBlockingHooks) ? 1 : 0;
+    var suggestions = [];
+    if (maturityLevel < 2) {
+      if (!hasIdentityLock && strongRuleCount < 3) {
+        suggestions.push('Consider adding identity lock statements to always-loaded steerings.');
+      }
+      if (destructiveHookCount === 0) {
+        suggestions.push('Consider adding preToolUse hooks for destructive operations.');
+      }
+      if (redundantRuleCount === 0 && maturityLevel >= 1) {
+        suggestions.push('Consider reinforcing critical rules by repeating them in 2+ steerings.');
+      }
+    }
+    return { maturityLevel: maturityLevel, hasIdentityLock: hasIdentityLock, strongRuleCount: strongRuleCount, redundantRuleCount: redundantRuleCount, destructiveHookCount: destructiveHookCount, suggestions: suggestions };
+  }
+
+  function detectIdentityLockWebview(nodes) {
+    var steerings = nodes.filter(isAlwaysLoadedSteeringWebview);
+    for (var i = 0; i < steerings.length; i++) {
+      var lines = getCheckableLinesWebview(steerings[i]);
+      for (var j = 0; j < lines.length; j++) {
+        var lower = lines[j].toLowerCase();
+        for (var k = 0; k < IDENTITY_LOCK_PATTERNS_WV.length; k++) {
+          if (lower.indexOf(IDENTITY_LOCK_PATTERNS_WV[k]) !== -1) { return true; }
+        }
+      }
+    }
+    return false;
+  }
+
+  function getCheckableLinesWebview(node) {
+    var lines = [];
+    var meta = node.metadata || {};
+    if (meta.imperativeLines) {
+      meta.imperativeLines.forEach(function(imp) { lines.push(imp.text); });
+    }
+    if (meta.content) {
+      var contentLines = meta.content.split('\n').slice(0, 10);
+      contentLines.forEach(function(cl) { lines.push(cl); });
+    }
+    return lines;
+  }
+
+  function countStrongLanguageWebview(nodes) {
+    var count = 0;
+    var steerings = nodes.filter(isAlwaysLoadedSteeringWebview);
+    for (var i = 0; i < steerings.length; i++) {
+      var lines = getAllNodeLinesWebview(steerings[i]);
+      for (var j = 0; j < lines.length; j++) {
+        for (var k = 0; k < STRONG_LANGUAGE_PATTERNS_WV.length; k++) {
+          if (lines[j].indexOf(STRONG_LANGUAGE_PATTERNS_WV[k]) !== -1) { count++; break; }
+        }
+      }
+    }
+    return count;
+  }
+
+  function getAllNodeLinesWebview(node) {
+    var lines = [];
+    var meta = node.metadata || {};
+    if (meta.imperativeLines) {
+      meta.imperativeLines.forEach(function(imp) { lines.push(imp.text); });
+    }
+    if (meta.content) {
+      meta.content.split('\n').forEach(function(cl) { lines.push(cl); });
+    }
+    return lines;
+  }
+
+  function countRedundantRulesWebview(nodes) {
+    var steerings = nodes.filter(isAlwaysLoadedSteeringWebview);
+    var subjectMap = {};
+    for (var i = 0; i < steerings.length; i++) {
+      var lines = (steerings[i].metadata && steerings[i].metadata.imperativeLines) || [];
+      for (var j = 0; j < lines.length; j++) {
+        var subject = extractSubjectWebview(lines[j].text);
+        if (!subject) { continue; }
+        if (!subjectMap[subject]) { subjectMap[subject] = {}; }
+        subjectMap[subject][steerings[i].id] = true;
+      }
+    }
+    var count = 0;
+    Object.keys(subjectMap).forEach(function(s) {
+      if (Object.keys(subjectMap[s]).length >= 2) { count++; }
+    });
+    return count;
+  }
+
+  function extractSubjectWebview(lineText) {
+    var words = lineText.toLowerCase().split(/\s+/).filter(function(w) {
+      return w.length > 2 && !STOP_WORDS_WV[w];
+    });
+    return words.slice(0, 4).join(' ');
+  }
+
+  function countDestructiveHooksWebview(nodes) {
+    var count = 0;
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      if (n.type !== 'hook-auto') { continue; }
+      if (!n.metadata || n.metadata.whenType !== 'preToolUse') { continue; }
+      var text = ((n.metadata.description || '') + ' ' + (n.metadata.hookPrompt || '') + ' ' + (n.label || '')).toLowerCase();
+      for (var j = 0; j < DESTRUCTIVE_TOOL_PATTERNS_WV.length; j++) {
+        if (text.indexOf(DESTRUCTIVE_TOOL_PATTERNS_WV[j]) !== -1) { count++; break; }
+      }
+    }
+    return count;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Health Score Computation
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -1612,6 +1745,9 @@ var CognitivePanel = (function () {
     // 18. Context Budget Estimator (Rule 25)
     var contextBudget = estimateContextBudgetWebview(data.nodes);
 
+    // 19. Jailbreak Protection (Rule 26)
+    var jailbreakProtection = analyzeJailbreakProtectionWebview(data.nodes);
+
     // 11. Cross-Workspace Topology: group external nodes by workspace
     var crossWorkspaceTopology = [];
     var workspaceGroups = {};
@@ -1715,6 +1851,7 @@ var CognitivePanel = (function () {
       guardrailCoverage: guardrailCoverage,
       instructionSpecificity: instructionSpecificity,
       contextBudget: contextBudget,
+      jailbreakProtection: jailbreakProtection,
       healthScore: computeHealthScore({
         steeringsSoltos: steeringsSoltos,
         vinculosFrageis: vinculosFrageis,
@@ -2395,6 +2532,28 @@ var CognitivePanel = (function () {
       }
       if (cb.suggestion) {
         html += '<div style="padding-left:6px;color:#FFC107;font-size:8px;margin-top:2px;">\u26A0 ' + escapeHtml(cb.suggestion) + '</div>';
+      }
+      html += '</div>';
+    }
+
+    // Jailbreak Protection (Rule 26)
+    if (analysis.jailbreakProtection) {
+      var jp = analysis.jailbreakProtection;
+      var jpBadge = jp.maturityLevel === 2 ? '\uD83D\uDFE2 Level 2 (Reinforced)' :
+        jp.maturityLevel === 1 ? '\uD83D\uDFE1 Level 1 (Basic)' : '\u26AA Level 0 (No protection)';
+      html += '<div style="margin-bottom:6px;border-top:1px solid #333;padding-top:6px;">';
+      html += '<span style="color:#90A4AE;font-weight:bold;">\uD83D\uDEE1\uFE0F Jailbreak Protection</span>';
+      html += '<div style="padding-left:6px;color:#B0BEC5;font-size:9px;margin-top:2px;">' + jpBadge + '</div>';
+      html += '<div style="padding-left:6px;color:#78909C;font-size:8px;">';
+      html += 'Identity Lock: ' + (jp.hasIdentityLock ? '\u2713' : '\u2717') + ' | ';
+      html += 'Strong Rules: ' + jp.strongRuleCount + ' | ';
+      html += 'Redundant: ' + jp.redundantRuleCount + ' | ';
+      html += 'Destructive Hooks: ' + jp.destructiveHookCount;
+      html += '</div>';
+      if (jp.suggestions.length > 0) {
+        jp.suggestions.forEach(function(s) {
+          html += '<div style="padding-left:6px;color:#90A4AE;font-size:8px;margin-top:1px;">\uD83D\uDCA1 ' + escapeHtml(s) + '</div>';
+        });
       }
       html += '</div>';
     }

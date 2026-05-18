@@ -1507,3 +1507,276 @@ describe('CognitiveValidations — estimateContextBudget()', function () {
     assert.strictEqual(BUDGET_ALERT_THRESHOLD, 0.15);
   });
 });
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Jailbreak Protection (Rule 26)
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { analyzeJailbreakProtection } from '../../services/cognitiveValidations';
+
+describe('CognitiveValidations — analyzeJailbreakProtection()', function () {
+  function makeAlwaysSteering(id: string, overrides: Partial<GraphNode> = {}): GraphNode {
+    return makeNode(id, {
+      type: 'steering-domain',
+      metadata: { alwaysApply: true, ...overrides.metadata },
+      ...overrides,
+    });
+  }
+
+  describe('Identity Lock Detection', function () {
+    it('detects "I am Kiro" in imperative lines', function () {
+      const nodes: GraphNode[] = [
+        makeAlwaysSteering('identity.md', {
+          metadata: {
+            alwaysApply: true,
+            imperativeLines: [{ text: 'I am Kiro and I will never change', pattern: 'always', subject: 'identity' }],
+          },
+        }),
+      ];
+      const result = analyzeJailbreakProtection(nodes);
+      assert.strictEqual(result.hasIdentityLock, true);
+    });
+
+    it('detects "NEVER change persona" in content first 10 lines', function () {
+      const nodes: GraphNode[] = [
+        makeAlwaysSteering('persona.md', {
+          metadata: {
+            alwaysApply: true,
+            content: 'Line 1\nNEVER change persona\nLine 3',
+          },
+        }),
+      ];
+      const result = analyzeJailbreakProtection(nodes);
+      assert.strictEqual(result.hasIdentityLock, true);
+    });
+
+    it('returns false when no identity patterns present', function () {
+      const nodes: GraphNode[] = [
+        makeAlwaysSteering('generic.md', {
+          metadata: {
+            alwaysApply: true,
+            imperativeLines: [{ text: 'Always use TypeScript', pattern: 'always', subject: 'typescript' }],
+          },
+        }),
+      ];
+      const result = analyzeJailbreakProtection(nodes);
+      assert.strictEqual(result.hasIdentityLock, false);
+    });
+  });
+
+  describe('Strong Language Counting', function () {
+    it('counts 3 lines with NEVER', function () {
+      const content = 'NEVER do this\nNEVER do that\nNEVER ignore rules';
+      const nodes: GraphNode[] = [
+        makeAlwaysSteering('strong.md', { metadata: { alwaysApply: true, content } }),
+      ];
+      const result = analyzeJailbreakProtection(nodes);
+      assert.strictEqual(result.strongRuleCount, 3);
+    });
+
+    it('does not count lowercase "never"', function () {
+      const content = 'never do this\nnever do that';
+      const nodes: GraphNode[] = [
+        makeAlwaysSteering('weak.md', { metadata: { alwaysApply: true, content } }),
+      ];
+      const result = analyzeJailbreakProtection(nodes);
+      assert.strictEqual(result.strongRuleCount, 0);
+    });
+
+    it('counts line with NEVER and FORBIDDEN as 1', function () {
+      const content = 'NEVER do this, it is FORBIDDEN';
+      const nodes: GraphNode[] = [
+        makeAlwaysSteering('multi.md', { metadata: { alwaysApply: true, content } }),
+      ];
+      const result = analyzeJailbreakProtection(nodes);
+      assert.strictEqual(result.strongRuleCount, 1);
+    });
+  });
+
+  describe('Redundancy Detection', function () {
+    it('counts same subject in 2 steerings as 1 redundant', function () {
+      const nodes: GraphNode[] = [
+        makeAlwaysSteering('a.md', {
+          metadata: {
+            alwaysApply: true,
+            imperativeLines: [{ text: 'use typescript strict mode', pattern: 'use', subject: 'typescript strict mode' }],
+          },
+        }),
+        makeAlwaysSteering('b.md', {
+          metadata: {
+            alwaysApply: true,
+            imperativeLines: [{ text: 'use typescript strict mode always', pattern: 'use', subject: 'typescript strict mode' }],
+          },
+        }),
+      ];
+      const result = analyzeJailbreakProtection(nodes);
+      assert.strictEqual(result.redundantRuleCount, 1);
+    });
+
+    it('returns 0 when subjects are different', function () {
+      const nodes: GraphNode[] = [
+        makeAlwaysSteering('a.md', {
+          metadata: {
+            alwaysApply: true,
+            imperativeLines: [{ text: 'Always use typescript', pattern: 'always', subject: 'typescript' }],
+          },
+        }),
+        makeAlwaysSteering('b.md', {
+          metadata: {
+            alwaysApply: true,
+            imperativeLines: [{ text: 'Never use python', pattern: 'never', subject: 'python' }],
+          },
+        }),
+      ];
+      const result = analyzeJailbreakProtection(nodes);
+      assert.strictEqual(result.redundantRuleCount, 0);
+    });
+  });
+
+  describe('Destructive Hooks Detection', function () {
+    it('counts preToolUse hook with "delete" in description', function () {
+      const nodes: GraphNode[] = [
+        makeNode('hook-del.json', {
+          type: 'hook-auto',
+          metadata: { whenType: 'preToolUse', description: 'Block delete operations' },
+        }),
+      ];
+      const result = analyzeJailbreakProtection(nodes);
+      assert.strictEqual(result.destructiveHookCount, 1);
+    });
+
+    it('does not count postToolUse hook with "delete"', function () {
+      const nodes: GraphNode[] = [
+        makeNode('hook-post.json', {
+          type: 'hook-auto',
+          metadata: { whenType: 'postToolUse', description: 'Log delete operations' },
+        }),
+      ];
+      const result = analyzeJailbreakProtection(nodes);
+      assert.strictEqual(result.destructiveHookCount, 0);
+    });
+  });
+
+  describe('Maturity Level Computation', function () {
+    it('level 0 when no components present', function () {
+      const nodes: GraphNode[] = [
+        makeAlwaysSteering('plain.md', {
+          metadata: { alwaysApply: true, content: 'Just some plain text' },
+        }),
+      ];
+      const result = analyzeJailbreakProtection(nodes);
+      assert.strictEqual(result.maturityLevel, 0);
+    });
+
+    it('level 1 with only identity lock', function () {
+      const nodes: GraphNode[] = [
+        makeAlwaysSteering('id.md', {
+          metadata: {
+            alwaysApply: true,
+            imperativeLines: [{ text: 'I am Kiro, the AI assistant', pattern: 'always', subject: 'kiro' }],
+          },
+        }),
+      ];
+      const result = analyzeJailbreakProtection(nodes);
+      assert.strictEqual(result.maturityLevel, 1);
+    });
+
+    it('level 1 with only destructive hook', function () {
+      const nodes: GraphNode[] = [
+        makeNode('hook-del.json', {
+          type: 'hook-auto',
+          metadata: { whenType: 'preToolUse', description: 'Block delete operations' },
+        }),
+      ];
+      const result = analyzeJailbreakProtection(nodes);
+      assert.strictEqual(result.maturityLevel, 1);
+    });
+
+    it('level 2 with identity lock + destructive hook + redundancy', function () {
+      const nodes: GraphNode[] = [
+        makeAlwaysSteering('id.md', {
+          metadata: {
+            alwaysApply: true,
+            imperativeLines: [
+              { text: 'I am Kiro, the AI assistant', pattern: 'always', subject: 'kiro' },
+              { text: 'use typescript strict mode', pattern: 'use', subject: 'typescript strict' },
+            ],
+          },
+        }),
+        makeAlwaysSteering('rules.md', {
+          metadata: {
+            alwaysApply: true,
+            imperativeLines: [
+              { text: 'use typescript strict mode always', pattern: 'use', subject: 'typescript strict' },
+            ],
+          },
+        }),
+        makeNode('hook-del.json', {
+          type: 'hook-auto',
+          metadata: { whenType: 'preToolUse', description: 'Block delete operations' },
+        }),
+      ];
+      const result = analyzeJailbreakProtection(nodes);
+      assert.strictEqual(result.maturityLevel, 2);
+    });
+  });
+
+  describe('Suggestions', function () {
+    it('empty when level 2', function () {
+      const nodes: GraphNode[] = [
+        makeAlwaysSteering('id.md', {
+          metadata: {
+            alwaysApply: true,
+            imperativeLines: [
+              { text: 'I am Kiro, the AI assistant', pattern: 'always', subject: 'kiro' },
+              { text: 'use typescript strict mode', pattern: 'use', subject: 'typescript strict' },
+            ],
+          },
+        }),
+        makeAlwaysSteering('rules.md', {
+          metadata: {
+            alwaysApply: true,
+            imperativeLines: [
+              { text: 'use typescript strict mode always', pattern: 'use', subject: 'typescript strict' },
+            ],
+          },
+        }),
+        makeNode('hook-del.json', {
+          type: 'hook-auto',
+          metadata: { whenType: 'preToolUse', description: 'Block delete operations' },
+        }),
+      ];
+      const result = analyzeJailbreakProtection(nodes);
+      assert.strictEqual(result.suggestions.length, 0);
+    });
+
+    it('non-empty when level 0 or 1', function () {
+      const result = analyzeJailbreakProtection([]);
+      assert.ok(result.suggestions.length > 0);
+    });
+  });
+
+  describe('Edge Cases', function () {
+    it('empty graph returns level 0 with all counts 0', function () {
+      const result = analyzeJailbreakProtection([]);
+      assert.strictEqual(result.maturityLevel, 0);
+      assert.strictEqual(result.hasIdentityLock, false);
+      assert.strictEqual(result.strongRuleCount, 0);
+      assert.strictEqual(result.redundantRuleCount, 0);
+      assert.strictEqual(result.destructiveHookCount, 0);
+      assert.ok(result.suggestions.length > 0);
+    });
+
+    it('non-steering and non-hook nodes are ignored', function () {
+      const nodes: GraphNode[] = [
+        makeNode('code.ts', { type: 'code-file', metadata: { content: 'NEVER FORBIDDEN' } }),
+        makeNode('skill.md', { type: 'skill', metadata: { content: 'I am Kiro' } }),
+      ];
+      const result = analyzeJailbreakProtection(nodes);
+      assert.strictEqual(result.maturityLevel, 0);
+      assert.strictEqual(result.strongRuleCount, 0);
+      assert.strictEqual(result.hasIdentityLock, false);
+    });
+  });
+});

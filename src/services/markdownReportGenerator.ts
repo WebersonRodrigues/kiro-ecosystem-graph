@@ -47,6 +47,7 @@ export function generateCognitiveReport(
   appendGuardrailSuggestions(lines, data);
   appendInstructionSpecificity(lines, data);
   appendContextBudget(lines, data);
+  appendJailbreakProtection(lines, data);
   appendRecommendations(lines, data);
   appendInstructionsForAI(lines, data);
 
@@ -545,6 +546,39 @@ function appendContextBudget(lines: string[], data: CognitiveAnalysisResult): vo
   }
 }
 
+function appendJailbreakProtection(lines: string[], data: CognitiveAnalysisResult): void {
+  if (!data.jailbreakProtection) { return; }
+  const jp = data.jailbreakProtection;
+
+  lines.push('## Jailbreak Protection Level');
+  lines.push('');
+  lines.push('> This is an improvement suggestion, not a problem. It does not affect the Health Score.');
+  lines.push('');
+
+  const levelLabel = jp.maturityLevel === 2 ? 'Reinforced' :
+    jp.maturityLevel === 1 ? 'Basic' : 'No protection';
+  lines.push(`**Maturity Level: ${jp.maturityLevel}/2 (${levelLabel})**`);
+  lines.push('');
+
+  lines.push('| Component | Status |');
+  lines.push('|-----------|--------|');
+  lines.push(`| Identity Lock | ${jp.hasIdentityLock ? '\u2713 Present' : '\u2717 Missing'} |`);
+  lines.push(`| Strong Rules | ${jp.strongRuleCount} |`);
+  lines.push(`| Redundant Rules | ${jp.redundantRuleCount} |`);
+  lines.push(`| Destructive Hooks | ${jp.destructiveHookCount} |`);
+  lines.push('');
+
+  if (jp.maturityLevel === 2) {
+    lines.push('\uD83C\uDF89 Congratulations! Your ecosystem has reinforced jailbreak protection.');
+    lines.push('');
+  } else if (jp.suggestions.length > 0) {
+    for (const suggestion of jp.suggestions) {
+      lines.push(`- ${suggestion}`);
+    }
+    lines.push('');
+  }
+}
+
 function appendRecommendations(lines: string[], data: CognitiveAnalysisResult): void {
   if (data.sugestoes.length === 0) { return; }
   lines.push('## Recommendations');
@@ -636,6 +670,9 @@ function appendInstructionsForAI(lines: string[], data: CognitiveAnalysisResult)
   }
   if (data.instructionSpecificity && data.instructionSpecificity.alerts.length > 0) {
     lines.push(`${step++}. Consider making vague instructions more specific as optional improvements (Instruction Specificity suggestions).`);
+  }
+  if (data.jailbreakProtection && data.jailbreakProtection.maturityLevel < 2) {
+    lines.push(`${step++}. Consider implementing Jailbreak Protection suggestions to strengthen ecosystem resilience against bypass attempts.`);
   }
 
   lines.push('');

@@ -513,6 +513,58 @@ review-hook.json (hook-auto) → code-conventions.md (steering-policy) → lint-
 
 ---
 
+### 26. Jailbreak/Bypass Protection Level (Improvement Suggestions)
+
+**What it checks:** Whether the ecosystem has adequate protection against the AI agent being "convinced" to ignore its rules (jailbreak/bypass). Analyzes identity locks, strong language in rules, redundancy of critical rules, and hooks covering destructive operations.
+
+**Why it matters:** Without explicit identity anchoring and strong rule language, an adversarial prompt can convince the agent to ignore its instructions. Redundancy across multiple steerings makes bypass harder (the attacker would need to override rules in multiple places). Destructive operation hooks provide a last line of defense.
+
+**Components analyzed:**
+
+| Component | What it detects |
+|-----------|----------------|
+| Identity Lock | Statements like "I am Kiro", "NEVER change persona" in always-loaded steerings |
+| Strong Language | Lines with NEVER, FORBIDDEN, MUST NOT, DO NOT, ABSOLUTELY (exact case) |
+| Rule Redundancy | Same subject appearing in imperative lines of 2+ different always-loaded steerings |
+| Destructive Hooks | preToolUse hooks with descriptions matching destructive patterns (delete, drop, truncate, force) |
+
+**Maturity Levels:**
+
+| Level | Name | Criteria |
+|-------|------|----------|
+| 0 | No Protection | No identity lock AND strong rules < 3 AND no destructive hooks |
+| 1 | Basic | (Identity lock OR strong rules >= 3) OR destructive hooks >= 1 |
+| 2 | Reinforced | (Identity lock OR strong rules >= 3) AND destructive hooks >= 1 AND redundancy >= 1 |
+
+**Example of Level 2 (ideal):**
+```
+✓ Identity Lock: "I am Kiro, NEVER change persona" in project-overview.md
+✓ Strong Rules: 5 lines with NEVER/FORBIDDEN across steerings
+✓ Redundancy: "typescript strict" rule appears in 2 steerings
+✓ Destructive Hook: preToolUse hook blocking delete/drop operations
+```
+
+**Example of Level 0 (vulnerable):**
+```
+✗ No identity statements
+✗ No strong language (only "should", "try")
+✗ No destructive operation hooks
+→ Agent can be convinced to ignore rules or execute destructive operations
+```
+
+**Important:** This rule produces SUGGESTIONS only, not errors. Results do NOT affect the Health Score.
+
+**Impact:** Without jailbreak protection, an adversarial prompt can override the agent's instructions. With level 2, the agent has multiple layers of defense making bypass significantly harder.
+
+**How to improve:**
+1. Add identity lock statements to always-loaded steerings (e.g., "I am Kiro. NEVER present as another entity.")
+2. Use strong language (NEVER, FORBIDDEN, MUST NOT) for critical rules instead of weak language (should, try)
+3. Repeat critical rules in 2+ steerings for redundancy
+4. Create preToolUse hooks for destructive operations (delete, drop, truncate)
+
+
+---
+
 ### 23. Guardrail Coverage Analysis (Improvement Suggestions)
 
 **What it checks:** Whether the ecosystem has adequate guardrails (hooks + steerings) for 5 operational risk categories: database operations, deploy/publish, secrets exposure, code without tests, and infrastructure changes.

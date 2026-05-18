@@ -17,8 +17,6 @@ import type {
   SignalNoiseAlert,
   Contradiction,
   HookCoverageMap,
-  QualityGateResult,
-  DmlProtectionResult,
   StaleContentAlert,
   LinkSuggestion,
   SemanticCoherenceAlert,
@@ -31,6 +29,7 @@ import type {
   InstructionSpecificityResult,
   ContextBudgetResult,
   ContextBudgetSteeringEntry,
+  JailbreakProtectionResult,
 } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1840,3 +1839,246 @@ export function estimateContextBudget(
   return { totalTokens, budgetPercent, maxBudget, perSteering, suggestion };
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Jailbreak/Bypass Protection (Rule 26)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Patterns indicating identity lock in steerings (lowercase for case-insensitive match) */
+const IDENTITY_LOCK_PATTERNS: string[] = [
+  'i am kiro', 'my identity', 'never change persona',
+  'do not impersonate', 'you are kiro',
+];
+
+/** Strong language patterns requiring exact case (all-caps) */
+const STRONG_LANGUAGE_PATTERNS: string[] = [
+  'NEVER', 'FORBIDDEN', 'MUST NOT', 'DO NOT', 'ABSOLUTELY',
+];
+
+/** Destructive tool patterns (lowercase for case-insensitive match) */
+const DESTRUCTIVE_TOOL_PATTERNS: string[] = [
+  'delete', 'remove', 'drop', 'destroy', 'truncate', 'force',
+];
+
+/** Stop words to ignore when extracting subjects */
+const STOP_WORDS = new Set([
+  'the', 'a', 'an', 'is', 'are', 'to', 'for', 'of', 'in',
+  'on', 'with', 'and', 'or', 'that', 'this', 'it', 'be',
+]);
+
+/**
+ * Detects whether any always-loaded steering contains identity lock patterns.
+ * Checks imperativeLines and first 10 lines of content (case-insensitive).
+ */
+function detectIdentityLock(nodes: GraphNode[]): boolean {
+  const steerings = nodes.filter(isAlwaysLoadedSteering);
+  for (const steering of steerings) {
+    if (checkIdentityInLines(steering)) { return true; }
+  }
+  return false;
+}
+
+function checkIdentityInLines(node: GraphNode): boolean {
+  const lines = getCheckableLines(node);
+  for (const line of lines) {
+    const lower = line.toLowerCase();
+    for (const pattern of IDENTITY_LOCK_PATTERNS) {
+      if (lower.includes(pattern)) { return true; }
+    }
+  }
+  return false;
+}
+
+/**
+ * Gets checkable lines: imperativeLines texts + first 10 lines of content.
+ */
+function getCheckableLines(node: GraphNode): string[] {
+  const lines: string[] = [];
+  const meta = node.metadata;
+  if (meta?.imperativeLines) {
+    for (const imp of meta.imperativeLines) { lines.push(imp.text); }
+  }
+  if (meta?.content) {
+    const contentLines = (meta.content as string).split('\n').slice(0, 10);
+    for (const cl of contentLines) { lines.push(cl); }
+  }
+  return lines;
+}
+
+/**
+ * Counts lines with strong language patterns (exact case: all-caps).
+ * Each line counts once even if multiple patterns match.
+ */
+function countStrongLanguage(nodes: GraphNode[]): number {
+  let count = 0;
+  const steerings = nodes.filter(isAlwaysLoadedSteering);
+  for (const steering of steerings) {
+    count += countStrongLinesInNode(steering);
+  }
+  return count;
+}
+
+function countStrongLinesInNode(node: GraphNode): number {
+  let count = 0;
+  const lines = getAllNodeLines(node);
+  for (const line of lines) {
+    if (STRONG_LANGUAGE_PATTERNS.some((p) => line.includes(p))) {
+      count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * Gets all text lines from a node (imperativeLines + content lines).
+ */
+function getAllNodeLines(node: GraphNode): string[] {
+  const lines: string[] = [];
+  const meta = node.metadata;
+  if (meta?.imperativeLines) {
+    for (const imp of meta.imperativeLines) { lines.push(imp.text); }
+  }
+  if (meta?.content) {
+    const contentLines = (meta.content as string).split('\n');
+    for (const cl of contentLines) { lines.push(cl); }
+  }
+  return lines;
+}
+
+/**
+ * Extracts first 3-4 significant words from a line (removes stop words, lowercase).
+ */
+function extractSubject(lineText: string): string {
+  const words = lineText.toLowerCase().split(/\s+/)
+    .filter((w) => w.length > 2 && !STOP_WORDS.has(w));
+  return words.slice(0, 4).join(' ');
+}
+
+/**
+ * Counts subjects that appear in imperativeLines of 2+ different always-loaded steerings.
+ */
+function countRedundantRules(nodes: GraphNode[]): number {
+  const steerings = nodes.filter(isAlwaysLoadedSteering);
+  const subjectMap = new Map<string, Set<string>>();
+
+  for (const steering of steerings) {
+    const lines = steering.metadata?.imperativeLines || [];
+    for (const line of lines) {
+      const subject = extractSubject(line.text);
+      if (!subject) { continue; }
+      if (!subjectMap.has(subject)) { subjectMap.set(subject, new Set()); }
+      subjectMap.get(subject)!.add(steering.id);
+    }
+  }
+
+  let redundantCount = 0;
+  for (const [, steeringIds] of subjectMap) {
+    if (steeringIds.size >= 2) { redundantCount++; }
+  }
+  return redundantCount;
+}
+
+/**
+ * Counts hooks with type 'hook-auto' AND whenType === 'preToolUse'
+ * AND description/hookPrompt/label matching destructive patterns.
+ */
+function countDestructiveHooks(nodes: GraphNode[]): number {
+  let count = 0;
+  for (const node of nodes) {
+    if (node.type !== 'hook-auto') { continue; }
+    if (node.metadata?.whenType !== 'preToolUse') { continue; }
+    if (matchesDestructivePattern(node)) { count++; }
+  }
+  return count;
+}
+
+function matchesDestructivePattern(node: GraphNode): boolean {
+  const meta = node.metadata;
+  const text = [
+    meta?.description || '',
+    meta?.hookPrompt || '',
+    node.label || '',
+  ].join(' ').toLowerCase();
+  return DESTRUCTIVE_TOOL_PATTERNS.some((p) => text.includes(p));
+}
+
+/**
+ * Computes jailbreak maturity level based on detected components.
+ * Level 0: no components
+ * Level 1: (identityLock OR strongRules >= 3) OR destructiveHooks >= 1
+ * Level 2: (identityLock OR strongRules >= 3) AND destructiveHooks >= 1 AND redundancy >= 1
+ */
+function computeJailbreakMaturity(
+  hasIdentityLock: boolean,
+  strongRuleCount: number,
+  redundantRuleCount: number,
+  destructiveHookCount: number,
+): 0 | 1 | 2 {
+  const hasAbsoluteRules = hasIdentityLock || strongRuleCount >= 3;
+  const hasBlockingHooks = destructiveHookCount >= 1;
+  const hasRedundancy = redundantRuleCount >= 1;
+
+  if (hasAbsoluteRules && hasBlockingHooks && hasRedundancy) { return 2; }
+  if (hasAbsoluteRules || hasBlockingHooks) { return 1; }
+  return 0;
+}
+
+/**
+ * Generates improvement suggestions with positive framing.
+ * Returns empty array when maturityLevel === 2.
+ */
+function generateJailbreakSuggestions(
+  maturityLevel: 0 | 1 | 2,
+  hasIdentityLock: boolean,
+  strongRuleCount: number,
+  destructiveHookCount: number,
+  redundantRuleCount: number,
+): string[] {
+  if (maturityLevel === 2) { return []; }
+  const suggestions: string[] = [];
+  if (!hasIdentityLock && strongRuleCount < 3) {
+    suggestions.push(
+      'Consider adding identity lock statements (e.g., "I am Kiro, NEVER change persona") to always-loaded steerings.',
+    );
+  }
+  if (destructiveHookCount === 0) {
+    suggestions.push(
+      'Consider adding preToolUse hooks for destructive operations (delete, drop, truncate, force).',
+    );
+  }
+  if (redundantRuleCount === 0 && maturityLevel >= 1) {
+    suggestions.push(
+      'Consider reinforcing critical rules by repeating them in 2+ steerings (redundancy makes bypass harder).',
+    );
+  }
+  return suggestions;
+}
+
+/**
+ * Analyzes jailbreak/bypass protection level of the ecosystem.
+ * Returns maturity level, component counts, and improvement suggestions.
+ */
+export function analyzeJailbreakProtection(
+  nodes: GraphNode[],
+): JailbreakProtectionResult {
+  const hasIdentityLock = detectIdentityLock(nodes);
+  const strongRuleCount = countStrongLanguage(nodes);
+  const redundantRuleCount = countRedundantRules(nodes);
+  const destructiveHookCount = countDestructiveHooks(nodes);
+  const maturityLevel = computeJailbreakMaturity(
+    hasIdentityLock, strongRuleCount, redundantRuleCount, destructiveHookCount,
+  );
+  const suggestions = generateJailbreakSuggestions(
+    maturityLevel, hasIdentityLock, strongRuleCount,
+    destructiveHookCount, redundantRuleCount,
+  );
+
+  return {
+    maturityLevel,
+    hasIdentityLock,
+    strongRuleCount,
+    redundantRuleCount,
+    destructiveHookCount,
+    suggestions,
+  };
+}

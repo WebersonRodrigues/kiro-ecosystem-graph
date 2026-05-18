@@ -419,6 +419,9 @@ export interface CognitiveAnalysisResult {
 
   /** Context budget estimation — informational only (Rule 25) */
   contextBudget?: ContextBudgetResult;
+
+  /** Jailbreak/bypass protection analysis — improvement suggestions (Rule 26) */
+  jailbreakProtection?: JailbreakProtectionResult;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -901,6 +904,26 @@ export interface ContextBudgetSteeringEntry {
   tokens: number;
   /** Percentage of total budget consumed by this steering */
   percent: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Jailbreak/Bypass Protection Types (Rule 26)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Jailbreak/bypass protection analysis result */
+export interface JailbreakProtectionResult {
+  /** Maturity level: 0=No protection, 1=Basic, 2=Reinforced */
+  maturityLevel: 0 | 1 | 2;
+  /** Whether an identity lock statement was found */
+  hasIdentityLock: boolean;
+  /** Count of lines with strong language (NEVER, FORBIDDEN, MUST NOT) */
+  strongRuleCount: number;
+  /** Count of subjects redundantly defined across 2+ steerings */
+  redundantRuleCount: number;
+  /** Count of preToolUse hooks covering destructive operations */
+  destructiveHookCount: number;
+  /** Improvement suggestions (empty when maturityLevel=2) */
+  suggestions: string[];
 }
 
 /** Complete context budget estimation result */
