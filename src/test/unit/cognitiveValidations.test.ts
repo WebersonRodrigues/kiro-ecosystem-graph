@@ -5,8 +5,12 @@ import {
   computeWeakInstructions,
   computeSteeringsWithoutAccess,
   computeDecisionPath,
+  computeSemanticCoherence,
+  isHeaderOnTopic,
+  tokenizeHeader,
+  KEYWORD_SETS,
 } from '../../services/cognitiveValidations';
-import type { GraphNode, GraphEdge } from '../../types';
+import type { GraphNode, GraphEdge, NodeType } from '../../types';
 
 function makeNode(id: string, overrides: Partial<GraphNode> = {}): GraphNode {
   return {
@@ -629,5 +633,182 @@ describe('CognitiveValidations — computeLinkSuggestions()', function () {
     const edges: GraphEdge[] = [];
     const result = computeLinkSuggestions(nodes, edges);
     assert.strictEqual(result.length, 0); // 60% is excluded
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Semantic Coherence (Rule 21)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('CognitiveValidations — computeSemanticCoherence()', function () {
+  it('steering with 100% on-topic headers produces no alert', function () {
+    const nodes: GraphNode[] = [
+      makeNode('security-policies.md', {
+        type: 'steering-policy',
+        metadata: { sectionHeaders: ['Security Rules', 'Access Control', 'Permission Model'] },
+      }),
+    ];
+    const result = computeSemanticCoherence(nodes);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('steering with 100% off-topic headers produces alert with coherence 0.0', function () {
+    const nodes: GraphNode[] = [
+      makeNode('security-policies.md', {
+        type: 'steering-policy',
+        metadata: { sectionHeaders: ['Deploy Pipeline', 'Database Migrations', 'Docker Setup'] },
+      }),
+    ];
+    const result = computeSemanticCoherence(nodes);
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].coherencePercent, 0);
+    assert.deepStrictEqual(result[0].offTopicHeaders, ['Deploy Pipeline', 'Database Migrations', 'Docker Setup']);
+  });
+
+  it('steering with mix of headers (2/5 on-topic = 0.40) produces alert', function () {
+    const nodes: GraphNode[] = [
+      makeNode('security-policies.md', {
+        type: 'steering-policy',
+        metadata: {
+          sectionHeaders: [
+            'Security Overview',   // on-topic (security)
+            'Deploy Pipeline',     // off-topic
+            'Access Rules',        // on-topic (access)
+            'Database Setup',      // off-topic
+            'Docker Config',       // off-topic
+          ],
+        },
+      }),
+    ];
+    const result = computeSemanticCoherence(nodes);
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].coherencePercent, 0.4);
+    assert.strictEqual(result[0].offTopicHeaders.length, 3);
+  });
+
+  it('steering without sectionHeaders produces no alert (coherence 1.0)', function () {
+    const nodes: GraphNode[] = [
+      makeNode('security-policies.md', {
+        type: 'steering-policy',
+        metadata: {},
+      }),
+    ];
+    const result = computeSemanticCoherence(nodes);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('node with NodeType without Keyword_Set is ignored', function () {
+    const nodes: GraphNode[] = [
+      makeNode('unknown.md', {
+        type: 'unknown' as NodeType,
+        metadata: { sectionHeaders: ['Random Header'] },
+      }),
+    ];
+    const result = computeSemanticCoherence(nodes);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('non-steering node (hook-auto) is ignored', function () {
+    const nodes: GraphNode[] = [
+      makeNode('my-hook.json', {
+        type: 'hook-auto',
+        metadata: { sectionHeaders: ['Some Header'] },
+      }),
+    ];
+    const result = computeSemanticCoherence(nodes);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('threshold exact: coherence 0.70 does NOT produce alert', function () {
+    // 7/10 on-topic = 0.70
+    const nodes: GraphNode[] = [
+      makeNode('tech-guide.md', {
+        type: 'steering-tech',
+        metadata: {
+          sectionHeaders: [
+            'API Design',          // on-topic
+            'Server Setup',        // on-topic
+            'Docker Config',       // on-topic
+            'Pipeline CI',         // on-topic (pipeline)
+            'Database Schema',     // on-topic
+            'Architecture Layers', // on-topic
+            'Deploy Strategy',     // on-topic
+            'Random Thoughts',     // off-topic
+            'Team Culture',        // off-topic
+            'Meeting Notes',       // off-topic
+          ],
+        },
+      }),
+    ];
+    const result = computeSemanticCoherence(nodes);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('threshold exact: coherence 0.69 (< 0.70) produces alert', function () {
+    // Need coherence just below 0.70. Use 9/13 = 0.692... still >= 0.70? No, 9/13 = 0.6923
+    // Actually 2/3 = 0.666... < 0.70
+    const nodes: GraphNode[] = [
+      makeNode('tech-guide.md', {
+        type: 'steering-tech',
+        metadata: {
+          sectionHeaders: [
+            'API Design',      // on-topic
+            'Random Thoughts', // off-topic
+            'Team Culture',    // off-topic (not in tech keywords)
+          ],
+        },
+      }),
+    ];
+    const result = computeSemanticCoherence(nodes);
+    assert.strictEqual(result.length, 1);
+    // 1/3 ≈ 0.333
+    assert.ok(result[0].coherencePercent < 0.70);
+  });
+
+  it('offTopicHeaders contains only headers that did not match', function () {
+    const nodes: GraphNode[] = [
+      makeNode('flow-guide.md', {
+        type: 'steering-flow',
+        metadata: {
+          sectionHeaders: [
+            'Workflow Steps',    // on-topic (workflow)
+            'Security Rules',   // off-topic
+            'Process Overview', // on-topic (process)
+            'Deploy Notes',     // off-topic
+          ],
+        },
+      }),
+    ];
+    const result = computeSemanticCoherence(nodes);
+    assert.strictEqual(result.length, 1);
+    assert.deepStrictEqual(result[0].offTopicHeaders, ['Security Rules', 'Deploy Notes']);
+  });
+
+  it('all 9 Keyword_Sets work with representative headers', function () {
+    const testCases: { type: NodeType; header: string }[] = [
+      { type: 'steering-policy', header: 'Security Guidelines' },
+      { type: 'steering-tech', header: 'API Architecture' },
+      { type: 'steering-flow', header: 'Workflow Steps' },
+      { type: 'steering-domain', header: 'Business Logic' },
+      { type: 'steering-product', header: 'Feature Roadmap' },
+      { type: 'steering-agent', header: 'Agent Behavior' },
+      { type: 'steering-help', header: 'FAQ Section' },
+      { type: 'steering-playbook', header: 'Incident Recovery' },
+      { type: 'steering-observability', header: 'Monitoring Dashboard' },
+    ];
+
+    for (const tc of testCases) {
+      const keywordSet = KEYWORD_SETS[tc.type]!;
+      assert.ok(keywordSet, `KEYWORD_SETS should have entry for ${tc.type}`);
+      assert.ok(
+        isHeaderOnTopic(tc.header, keywordSet),
+        `Header "${tc.header}" should be on-topic for ${tc.type}`,
+      );
+    }
+  });
+
+  it('tokenizeHeader splits by non-alphanumeric and lowercases', function () {
+    const tokens = tokenizeHeader('Deploy-Pipeline (CI/CD)');
+    assert.deepStrictEqual(tokens, ['deploy', 'pipeline', 'ci', 'cd']);
   });
 });

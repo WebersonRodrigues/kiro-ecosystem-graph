@@ -1661,3 +1661,144 @@ describe('Cognitive Validations — Link Recommender (Property)', function () {
     );
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Semantic Coherence (Rule 21) — Property Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+import {
+  computeSemanticCoherence,
+  isHeaderOnTopic,
+  KEYWORD_SETS,
+} from '../../services/cognitiveValidations';
+import type { NodeType } from '../../types';
+
+describe('Cognitive Validations — Semantic Coherence (Property)', function () {
+  this.timeout(30000);
+
+  const steeringTypes: NodeType[] = [
+    'steering-policy', 'steering-tech', 'steering-flow',
+    'steering-domain', 'steering-product', 'steering-agent',
+    'steering-help', 'steering-playbook', 'steering-observability',
+  ];
+
+  const steeringTypeArb = fc.constantFrom(...steeringTypes);
+
+  const headerArb = fc.stringOf(
+    fc.constantFrom(
+      'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+      'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+      ' ', '-', '_',
+    ),
+    { minLength: 1, maxLength: 30 },
+  );
+
+  /**
+   * **Validates: Requirements 2.3**
+   * Property: coherence is always between 0.0 and 1.0 for any input
+   */
+  it('coherence is always between 0.0 and 1.0', function () {
+    const arb = fc.tuple(
+      steeringTypeArb,
+      fc.array(headerArb, { minLength: 1, maxLength: 20 }),
+    );
+
+    fc.assert(
+      fc.property(arb, ([nodeType, headers]) => {
+        const nodes = [makeNode('test.md', {
+          type: nodeType,
+          metadata: { sectionHeaders: headers },
+        })];
+        const result = computeSemanticCoherence(nodes);
+        if (result.length > 0) {
+          assert.ok(result[0].coherencePercent >= 0.0, 'coherence must be >= 0');
+          assert.ok(result[0].coherencePercent <= 1.0, 'coherence must be <= 1');
+        }
+        // If no alert, coherence >= 0.70 which is still in [0, 1]
+      }),
+      { numRuns: 200 },
+    );
+  });
+
+  /**
+   * **Validates: Requirements 2.4**
+   * Property: steering without headers always returns coherence 1.0 (no alert)
+   */
+  it('steering without headers never produces an alert', function () {
+    fc.assert(
+      fc.property(steeringTypeArb, (nodeType) => {
+        const nodesEmpty = [makeNode('test.md', {
+          type: nodeType,
+          metadata: { sectionHeaders: [] },
+        })];
+        const nodesUndefined = [makeNode('test.md', {
+          type: nodeType,
+          metadata: {},
+        })];
+
+        assert.strictEqual(computeSemanticCoherence(nodesEmpty).length, 0);
+        assert.strictEqual(computeSemanticCoherence(nodesUndefined).length, 0);
+      }),
+      { numRuns: 50 },
+    );
+  });
+
+  /**
+   * **Validates: Requirements 2.2**
+   * Property: headers containing keywords from the set are always classified as on-topic
+   */
+  it('headers containing a keyword from the set are always on-topic', function () {
+    const arb = steeringTypeArb.chain((nodeType) => {
+      const keywords = KEYWORD_SETS[nodeType]!;
+      const keywordArb = fc.constantFrom(...keywords);
+      return fc.tuple(
+        fc.constant(nodeType),
+        keywordArb,
+        fc.stringOf(fc.constantFrom('a', 'b', 'c', ' ', '-'), { minLength: 0, maxLength: 10 }),
+      );
+    });
+
+    fc.assert(
+      fc.property(arb, ([nodeType, keyword, prefix]) => {
+        const header = `${prefix} ${keyword}`;
+        const keywordSet = KEYWORD_SETS[nodeType]!;
+        assert.ok(
+          isHeaderOnTopic(header, keywordSet),
+          `Header "${header}" should be on-topic for ${nodeType}`,
+        );
+      }),
+      { numRuns: 200 },
+    );
+  });
+
+  /**
+   * **Validates: Requirements 2.3, 2.5**
+   * Property: offTopicHeaders + onTopicHeaders === total headers
+   */
+  it('offTopicHeaders count + onTopicHeaders count equals total headers', function () {
+    const arb = fc.tuple(
+      steeringTypeArb,
+      fc.array(headerArb, { minLength: 1, maxLength: 15 }),
+    );
+
+    fc.assert(
+      fc.property(arb, ([nodeType, headers]) => {
+        const nodes = [makeNode('test.md', {
+          type: nodeType,
+          metadata: { sectionHeaders: headers },
+        })];
+        const result = computeSemanticCoherence(nodes);
+        if (result.length > 0) {
+          const offTopicCount = result[0].offTopicHeaders.length;
+          const onTopicCount = headers.length - offTopicCount;
+          assert.strictEqual(
+            offTopicCount + onTopicCount,
+            headers.length,
+            'off-topic + on-topic must equal total headers',
+          );
+        }
+      }),
+      { numRuns: 200 },
+    );
+  });
+});

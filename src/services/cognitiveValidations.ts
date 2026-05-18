@@ -9,6 +9,7 @@
 import type {
   GraphNode,
   GraphEdge,
+  NodeType,
   DeadLoop,
   HopAlert,
   DuplicatePair,
@@ -20,6 +21,7 @@ import type {
   DmlProtectionResult,
   StaleContentAlert,
   LinkSuggestion,
+  SemanticCoherenceAlert,
 } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1104,4 +1106,91 @@ function evaluatePair(
 function computeSharedKeywords(keywordsA: string[], keywordsB: string[]): string[] {
   const setB = new Set(keywordsB);
   return keywordsA.filter((kw) => setB.has(kw));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Semantic Coherence (Rule 21)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Keyword sets mapping each steering NodeType to expected domain terms */
+export const KEYWORD_SETS: Partial<Record<NodeType, string[]>> = {
+  'steering-policy': ['security', 'auth', 'permission', 'access', 'compliance', 'governance', 'guard', 'policy', 'rule', 'restrict', 'allow', 'deny', 'segurança', 'permissão', 'acesso', 'política', 'regra'],
+  'steering-tech': ['deploy', 'pipeline', 'infrastructure', 'architecture', 'stack', 'database', 'migration', 'ci', 'cd', 'docker', 'kubernetes', 'api', 'endpoint', 'server', 'tecnologia', 'arquitetura', 'infraestrutura'],
+  'steering-flow': ['flow', 'step', 'sequence', 'process', 'workflow', 'trigger', 'action', 'state', 'transition', 'fluxo', 'etapa', 'processo', 'sequência'],
+  'steering-domain': ['domain', 'entity', 'model', 'business', 'rule', 'logic', 'convention', 'pattern', 'domínio', 'entidade', 'modelo', 'negócio', 'regra', 'convenção', 'padrão'],
+  'steering-product': ['product', 'feature', 'user', 'story', 'requirement', 'backlog', 'sprint', 'roadmap', 'produto', 'funcionalidade', 'usuário', 'requisito'],
+  'steering-agent': ['agent', 'persona', 'prompt', 'llm', 'ai', 'behavior', 'instruction', 'context', 'agente', 'comportamento', 'instrução', 'contexto'],
+  'steering-help': ['help', 'faq', 'question', 'answer', 'guide', 'tutorial', 'howto', 'ajuda', 'pergunta', 'resposta', 'guia'],
+  'steering-playbook': ['playbook', 'runbook', 'incident', 'procedure', 'checklist', 'step', 'recovery', 'procedimento', 'incidente', 'recuperação'],
+  'steering-observability': ['observability', 'monitoring', 'logging', 'tracing', 'alert', 'metric', 'dashboard', 'sla', 'observabilidade', 'monitoramento', 'alerta', 'métrica'],
+};
+
+/**
+ * Computes semantic coherence alerts for steering nodes whose section headers
+ * don't match the expected domain keywords for their NodeType.
+ *
+ * @param nodes - All graph nodes
+ * @returns Array of alerts for steerings with coherence < 0.70
+ */
+export function computeSemanticCoherence(nodes: GraphNode[]): SemanticCoherenceAlert[] {
+  const steeringNodes = filterSemanticCandidates(nodes);
+  const alerts: SemanticCoherenceAlert[] = [];
+
+  for (const node of steeringNodes) {
+    const alert = evaluateNodeCoherence(node);
+    if (alert) { alerts.push(alert); }
+  }
+
+  return alerts;
+}
+
+function filterSemanticCandidates(nodes: GraphNode[]): GraphNode[] {
+  return nodes.filter((n) => {
+    if (!n.type || !n.type.startsWith('steering-')) { return false; }
+    if (n.type === 'unknown') { return false; }
+    return KEYWORD_SETS[n.type] !== undefined;
+  });
+}
+
+function evaluateNodeCoherence(node: GraphNode): SemanticCoherenceAlert | null {
+  const headers = node.metadata?.sectionHeaders;
+  if (!headers || headers.length === 0) { return null; }
+
+  const keywordSet = KEYWORD_SETS[node.type]!;
+  const offTopicHeaders: string[] = [];
+
+  for (const header of headers) {
+    if (!isHeaderOnTopic(header, keywordSet)) {
+      offTopicHeaders.push(header);
+    }
+  }
+
+  const onTopicCount = headers.length - offTopicHeaders.length;
+  const coherence = onTopicCount / headers.length;
+
+  if (coherence >= 0.70) { return null; }
+
+  return {
+    id: node.id,
+    label: node.label,
+    filePath: node.filePath,
+    nodeType: node.type,
+    coherencePercent: coherence,
+    offTopicHeaders,
+  };
+}
+
+/**
+ * Tokenizes a header and checks if at least one token matches the keyword set.
+ */
+export function isHeaderOnTopic(header: string, keywordSet: string[]): boolean {
+  const tokens = tokenizeHeader(header);
+  return tokens.some((token) => keywordSet.includes(token));
+}
+
+/**
+ * Tokenizes a header: lowercase, split by non-alphanumeric characters.
+ */
+export function tokenizeHeader(header: string): string[] {
+  return header.toLowerCase().split(/[^a-záàâãéèêíïóôõöúçñü]+/).filter((t) => t.length > 0);
 }

@@ -400,6 +400,51 @@ crm-domain.md (auto, 200 linhas)  →  índice/overview, referencia sub-domínio
 
 ---
 
+### 20. Stale Content (Detecção de Hubs Desatualizados)
+
+**O que verifica:** Steerings não modificados há 90+ dias que possuem 3+ conexões (hubs de alto grau). São documentos desatualizados que propagam informação obsoleta por muitos caminhos.
+
+**Por que importa:** Um steering hub que não foi atualizado em meses pode conter regras desatualizadas, padrões deprecados ou referências incorretas. Por ser altamente conectado, muitos outros steerings e hooks dependem dele — amplificando o impacto do conteúdo obsoleto.
+
+**Exemplo:**
+```
+code-conventions.md (always, 4 conexões, última modificação há 120 dias)  →  STALE HUB
+  Risk Score: 120 × 4 = 480
+```
+
+**Impacto:** O agente segue regras desatualizadas de um documento central, propagando comportamento incorreto pelo ecossistema.
+
+**Como resolver:** Revise e atualize o conteúdo para refletir as práticas atuais. Se o steering não é mais necessário, remova-o ou reduza suas conexões.
+
+---
+
+### 21. Semantic Coherence (Detecção de Vazamento de Escopo)
+
+**O que verifica:** Se os headers de seção de um steering correspondem ao domínio esperado pela classificação do seu NodeType. Cada tipo de steering (policy, tech, flow, domain, product, agent, help, playbook, observability) tem um conjunto de keywords esperadas. Os headers são tokenizados e comparados contra o keyword set.
+
+**Por que importa:** Quando um arquivo `steering-policy` contém seções sobre "Deploy Pipeline" e "Database Migrations", isso indica vazamento de escopo — conteúdo de tech/domain está sangrando para um arquivo de política. Isso confunde o agente sobre onde encontrar informação específica e dilui o propósito do steering.
+
+**Algoritmo:**
+1. Para cada nó steering, obter seu NodeType e keyword set correspondente
+2. Tokenizar cada header de seção (lowercase, split por não-alfanuméricos)
+3. Um header é "on-topic" se pelo menos um token corresponde a uma keyword do set
+4. Coerência = headers on-topic / total de headers
+5. Alertar quando coerência < 0.70 (mais de 30% off-topic)
+
+**Exemplo:**
+```
+security-policies.md (steering-policy)
+  Headers: "Security Rules", "Access Control", "Deploy Pipeline", "Database Setup", "Docker Config"
+  On-topic: 2/5 = 40% coerência  →  ALERTA
+  Off-topic headers: "Deploy Pipeline", "Database Setup", "Docker Config"
+```
+
+**Impacto:** O agente carrega um steering de política esperando regras de segurança mas encontra conteúdo de infraestrutura misturado, reduzindo a clareza das instruções.
+
+**Como resolver:** Mova seções off-topic para um steering do tipo apropriado (ex: mover conteúdo de deploy para um arquivo `steering-tech`).
+
+---
+
 ## Resumo Visual
 
 ```
@@ -411,16 +456,19 @@ crm-domain.md (auto, 200 linhas)  →  índice/overview, referencia sub-domínio
 │  ├─ Orphan Steerings          ├─ Passive Knowledge              │
 │  ├─ Fragile Links             ├─ Signal-to-Noise                │
 │  ├─ Isolated Files            ├─ Duplicate Intent               │
-│  ├─ Coverage Gaps             └─ Contradictions                 │
-│  ├─ Dead Loops                                                  │
-│  └─ Hops to Reach            SEGURANÇA E MATURIDADE            │
-│                               ├─ Quality Gate (0/1/2)           │
-│  COMPLETUDE                   ├─ DML Protection (0/1/2)         │
-│  ├─ Hooks Without Instruction ├─ Hook Coverage Map              │
-│  ├─ Steerings Without Access  └─ Decision Path                  │
-│  ├─ Weak Instructions                                           │
-│  ├─ Context Overload          MODULARIZAÇÃO                     │
-│  └─ Large Domain Steerings    └─ Auto steerings > 1000 linhas   │
+│  ├─ Coverage Gaps             ├─ Contradictions                 │
+│  ├─ Dead Loops                └─ Semantic Coherence             │
+│  └─ Hops to Reach                                              │
+│                              SEGURANÇA E MATURIDADE             │
+│  COMPLETUDE                   ├─ Quality Gate (0/1/2)           │
+│  ├─ Hooks Without Instruction ├─ DML Protection (0/1/2)         │
+│  ├─ Steerings Without Access  ├─ Hook Coverage Map              │
+│  ├─ Weak Instructions         └─ Decision Path                  │
+│  ├─ Context Overload                                            │
+│  └─ Large Domain Steerings   FRESCOR                            │
+│                               └─ Stale Content                  │
+│  MODULARIZAÇÃO                                                  │
+│  └─ Auto steerings > 1000 linhas                               │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -435,4 +483,4 @@ crm-domain.md (auto, 200 linhas)  →  índice/overview, referencia sub-domínio
 
 ---
 
-*Versão: 0.2.2 | 19 regras de análise | 207 testes automatizados*
+*Versão: 0.2.2 | 21 regras de análise | 207 testes automatizados*

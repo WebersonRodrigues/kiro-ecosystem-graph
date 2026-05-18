@@ -42,6 +42,7 @@ export function generateCognitiveReport(
   appendDmlProtection(lines, data);
   appendStaleContent(lines, data);
   appendSuggestedConnections(lines, data);
+  appendSemanticCoherence(lines, data);
   appendRecommendations(lines, data);
   appendInstructionsForAI(lines, data);
 
@@ -77,6 +78,9 @@ function appendSummaryTable(lines: string[], data: CognitiveAnalysisResult): voi
   lines.push(`| DML Protection Level | ${data.dmlProtection ? data.dmlProtection.maturityLevel : 0}/2 |`);
   if (data.staleContent && data.staleContent.length > 0) {
     lines.push(`| Stale Content | ${data.staleContent.length} |`);
+  }
+  if (data.semanticCoherence && data.semanticCoherence.length > 0) {
+    lines.push(`| Semantic Coherence | ${data.semanticCoherence.length} |`);
   }
   if (data.healthScore) {
     lines.push(`| **Health Score** | **${data.healthScore.score}/100** |`);
@@ -425,6 +429,23 @@ function appendSuggestedConnections(lines: string[], data: CognitiveAnalysisResu
   lines.push('');
 }
 
+function appendSemanticCoherence(lines: string[], data: CognitiveAnalysisResult): void {
+  const items = data.semanticCoherence || [];
+  if (items.length === 0) { return; }
+  lines.push('## Semantic Coherence');
+  lines.push('');
+  lines.push('Steerings whose section headers don\'t match the expected domain of their NodeType — indicating scope leakage.');
+  lines.push('');
+  lines.push('| File Path | Coherence % | Off-Topic Headers | Tip |');
+  lines.push('|-----------|------------|-------------------|-----|');
+  for (const item of items) {
+    const pct = Math.round(item.coherencePercent * 100);
+    const headers = item.offTopicHeaders.join(', ');
+    lines.push(`| \`${item.filePath}\` | ${pct}% | ${headers} | Move off-topic content to a steering of the appropriate type |`);
+  }
+  lines.push('');
+}
+
 function appendRecommendations(lines: string[], data: CognitiveAnalysisResult): void {
   if (data.sugestoes.length === 0) { return; }
   lines.push('## Recommendations');
@@ -499,6 +520,9 @@ function appendInstructionsForAI(lines: string[], data: CognitiveAnalysisResult)
   }
   if ((data.suggestedConnections || []).length > 0) {
     lines.push(`${step++}. For each Suggested Connection, add a cross-reference between the two steerings.`);
+  }
+  if ((data.semanticCoherence || []).length > 0) {
+    lines.push(`${step++}. For each Semantic Coherence alert, move off-topic content to a steering of the appropriate NodeType.`);
   }
 
   lines.push('');

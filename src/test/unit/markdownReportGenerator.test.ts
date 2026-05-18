@@ -339,3 +339,64 @@ describe('MarkdownReportGenerator', function () {
       assert.ok(report.includes('For each Suggested Connection, add a cross-reference'));
     });
   });
+
+  describe('Semantic Coherence section', function () {
+    it('generates Semantic Coherence section with valid data', function () {
+      const data = createMinimalResult();
+      data.semanticCoherence = [
+        {
+          id: 'security-policies.md',
+          label: 'security-policies',
+          filePath: '.kiro/steering/security-policies.md',
+          nodeType: 'steering-policy',
+          coherencePercent: 0.4,
+          offTopicHeaders: ['Deploy Pipeline', 'Database Migrations'],
+        },
+      ];
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('## Semantic Coherence'));
+      assert.ok(report.includes('security-policies.md'));
+      assert.ok(report.includes('40%'));
+      assert.ok(report.includes('Deploy Pipeline, Database Migrations'));
+      assert.ok(report.includes('Move off-topic content'));
+    });
+
+    it('omits Semantic Coherence section when array is empty or undefined', function () {
+      const data = createMinimalResult();
+      data.semanticCoherence = [];
+
+      const report = generateCognitiveReport(data);
+      assert.ok(!report.includes('## Semantic Coherence'));
+
+      const data2 = createMinimalResult();
+      // semanticCoherence is undefined by default
+      const report2 = generateCognitiveReport(data2);
+      assert.ok(!report2.includes('## Semantic Coherence'));
+    });
+
+    it('includes Semantic Coherence count in Summary table', function () {
+      const data = createMinimalResult();
+      data.semanticCoherence = [
+        {
+          id: 'a.md',
+          label: 'a',
+          filePath: 'a.md',
+          nodeType: 'steering-policy',
+          coherencePercent: 0.3,
+          offTopicHeaders: ['Random'],
+        },
+        {
+          id: 'b.md',
+          label: 'b',
+          filePath: 'b.md',
+          nodeType: 'steering-tech',
+          coherencePercent: 0.5,
+          offTopicHeaders: ['Other'],
+        },
+      ];
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('| Semantic Coherence | 2 |'));
+    });
+  });

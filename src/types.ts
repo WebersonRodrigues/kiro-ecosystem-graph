@@ -393,6 +393,9 @@ export interface CognitiveAnalysisResult {
 
   /** Suggested connections between steerings with keyword overlap (Link Recommender) */
   suggestedConnections?: LinkSuggestion[];
+
+  /** Steerings with section headers mismatched to their NodeType domain (Rule 21) */
+  semanticCoherence?: SemanticCoherenceAlert[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -427,6 +430,26 @@ export interface StaleContentAlert {
   degree: number;
   /** Risk score: stalenessDays × degree */
   riskScore: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Semantic Coherence Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A steering flagged for semantic incoherence (section headers don't match NodeType domain) */
+export interface SemanticCoherenceAlert {
+  /** Node ID (relative path) */
+  id: string;
+  /** Display label */
+  label: string;
+  /** File path of the steering */
+  filePath: string;
+  /** NodeType classification of the steering */
+  nodeType: NodeType;
+  /** Proportion of on-topic headers (0.0 - 1.0) */
+  coherencePercent: number;
+  /** Headers that did not match the expected keyword set */
+  offTopicHeaders: string[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

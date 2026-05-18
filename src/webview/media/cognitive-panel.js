@@ -604,6 +604,48 @@ var CognitivePanel = (function () {
     return Math.round((intersection / minSize) * 100);
   }
 
+  // ─── Semantic Coherence (Rule 21) ──────────────────────────────────────
+
+  var SEMANTIC_KEYWORD_SETS = {
+    'steering-policy': ['security', 'auth', 'permission', 'access', 'compliance', 'governance', 'guard', 'policy', 'rule', 'restrict', 'allow', 'deny', 'segurança', 'permissão', 'acesso', 'política', 'regra'],
+    'steering-tech': ['deploy', 'pipeline', 'infrastructure', 'architecture', 'stack', 'database', 'migration', 'ci', 'cd', 'docker', 'kubernetes', 'api', 'endpoint', 'server', 'tecnologia', 'arquitetura', 'infraestrutura'],
+    'steering-flow': ['flow', 'step', 'sequence', 'process', 'workflow', 'trigger', 'action', 'state', 'transition', 'fluxo', 'etapa', 'processo', 'sequência'],
+    'steering-domain': ['domain', 'entity', 'model', 'business', 'rule', 'logic', 'convention', 'pattern', 'domínio', 'entidade', 'modelo', 'negócio', 'regra', 'convenção', 'padrão'],
+    'steering-product': ['product', 'feature', 'user', 'story', 'requirement', 'backlog', 'sprint', 'roadmap', 'produto', 'funcionalidade', 'usuário', 'requisito'],
+    'steering-agent': ['agent', 'persona', 'prompt', 'llm', 'ai', 'behavior', 'instruction', 'context', 'agente', 'comportamento', 'instrução', 'contexto'],
+    'steering-help': ['help', 'faq', 'question', 'answer', 'guide', 'tutorial', 'howto', 'ajuda', 'pergunta', 'resposta', 'guia'],
+    'steering-playbook': ['playbook', 'runbook', 'incident', 'procedure', 'checklist', 'step', 'recovery', 'procedimento', 'incidente', 'recuperação'],
+    'steering-observability': ['observability', 'monitoring', 'logging', 'tracing', 'alert', 'metric', 'dashboard', 'sla', 'observabilidade', 'monitoramento', 'alerta', 'métrica'],
+  };
+
+  /**
+   * Compute semantic coherence alerts (webview version).
+   * @param {any[]} nodes
+   * @returns {{ id: string, label: string, filePath: string, nodeType: string, coherencePercent: number, offTopicHeaders: string[] }[]}
+   */
+  function computeSemanticCoherenceWebview(nodes) {
+    var alerts = [];
+    nodes.forEach(function(n) {
+      if (!n.type || n.type.indexOf('steering-') !== 0) { return; }
+      if (n.type === 'unknown') { return; }
+      var keywordSet = SEMANTIC_KEYWORD_SETS[n.type];
+      if (!keywordSet) { return; }
+      var headers = (n.metadata && n.metadata.sectionHeaders) || [];
+      if (headers.length === 0) { return; }
+      var offTopicHeaders = [];
+      headers.forEach(function(header) {
+        var tokens = header.toLowerCase().split(/[^a-záàâãéèêíïóôõöúçñü]+/).filter(function(t) { return t.length > 0; });
+        var isOnTopic = tokens.some(function(token) { return keywordSet.indexOf(token) !== -1; });
+        if (!isOnTopic) { offTopicHeaders.push(header); }
+      });
+      var coherence = (headers.length - offTopicHeaders.length) / headers.length;
+      if (coherence < 0.70) {
+        alerts.push({ id: n.id, label: n.label, filePath: n.filePath || n.id, nodeType: n.type, coherencePercent: coherence, offTopicHeaders: offTopicHeaders });
+      }
+    });
+    return alerts;
+  }
+
   // ─── Structure Validations ─────────────────────────────────────────────
 
   /**
@@ -1244,6 +1286,9 @@ var CognitivePanel = (function () {
     // 13. Link Recommender (Suggested Connections)
     var suggestedConnections = computeLinkSuggestionsWebview(data.nodes, data.links, duplicateIntent);
 
+    // 14. Semantic Coherence (Rule 21)
+    var semanticCoherence = computeSemanticCoherenceWebview(data.nodes);
+
     // 11. Cross-Workspace Topology: group external nodes by workspace
     var crossWorkspaceTopology = [];
     var workspaceGroups = {};
@@ -1339,6 +1384,7 @@ var CognitivePanel = (function () {
       crossWorkspaceTopology: crossWorkspaceTopology,
       staleContent: staleContent,
       suggestedConnections: suggestedConnections,
+      semanticCoherence: semanticCoherence,
       healthScore: computeHealthScore({
         steeringsSoltos: steeringsSoltos,
         vinculosFrageis: vinculosFrageis,
@@ -1901,6 +1947,27 @@ var CognitivePanel = (function () {
       }
       html += '</div>';
     }
+
+    // Semantic Coherence (Rule 21)
+    html += '<div style="margin-bottom:6px;"><span style="color:#AB47BC;font-weight:bold;">\uD83C\uDFAF Semantic Coherence</span>';
+    if (!analysis.semanticCoherence || analysis.semanticCoherence.length === 0) {
+      html += ' <span style="color:#4CAF50;">0</span>';
+    } else {
+      html += ' <span style="color:#AB47BC;">' + analysis.semanticCoherence.length + '</span>';
+      analysis.semanticCoherence.slice(0, 5).forEach(function(item) {
+        var pct = Math.round(item.coherencePercent * 100);
+        var pctColor = pct < 50 ? '#F44336' : '#FF9800';
+        html += '<div style="padding-left:6px;">';
+        html += '<a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + '</a>';
+        html += ' <span style="color:' + pctColor + ';font-size:9px;">' + pct + '%</span>';
+        html += '<div style="padding-left:6px;color:#888;font-size:8px;">Off-topic: ' + item.offTopicHeaders.slice(0, 3).map(function(h) { return escapeHtml(h); }).join(', ') + '</div>';
+        html += '</div>';
+      });
+      if (analysis.semanticCoherence.length > 5) {
+        html += '<div style="padding-left:6px;color:#666;font-size:9px;">...and ' + (analysis.semanticCoherence.length - 5) + ' more</div>';
+      }
+    }
+    html += '</div>';
 
     // Suggestions
     if (analysis.sugestoes.length > 0) {
