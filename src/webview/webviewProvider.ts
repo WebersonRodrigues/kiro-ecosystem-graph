@@ -7,6 +7,7 @@ import { SnapshotService } from '../services/snapshotService';
 import { generateCognitiveReport } from '../services/markdownReportGenerator';
 import { generateTargetedPrompt, generateConsolidatedPrompt } from '../services/fixPromptGenerator';
 import { getTemplate } from '../services/onboardingTemplates';
+import { generateMermaidFlowchart } from '../services/mermaidGenerator';
 
 /**
  * Webview provider for the Ecosystem Graph panel.
@@ -126,6 +127,9 @@ export class EcosystemGraphProvider implements vscode.WebviewViewProvider {
         break;
       case 'createFromTemplate':
         this.handleCreateFromTemplate(message.templateKey, message.fileName, message.targetDir);
+        break;
+      case 'exportMermaid':
+        this.handleExportMermaid(message.data.nodes, message.data.edges, message.action);
         break;
     }
   }
@@ -308,6 +312,45 @@ export class EcosystemGraphProvider implements vscode.WebviewViewProvider {
       await vscode.workspace.fs.writeFile(fileUri, Buffer.from(template, 'utf-8'));
       const document = await vscode.workspace.openTextDocument(fileUri);
       await vscode.window.showTextDocument(document);
+    }
+  }
+
+  /**
+   * Handles Mermaid export: generates flowchart syntax and copies to clipboard or saves to file.
+   */
+  private async handleExportMermaid(
+    nodes: import('../types').GraphNode[],
+    edges: import('../types').GraphEdge[],
+    action: 'clipboard' | 'file',
+  ): Promise<void> {
+    const mermaid = generateMermaidFlowchart(nodes, edges);
+
+    if (action === 'clipboard') {
+      await vscode.env.clipboard.writeText(mermaid);
+      vscode.window.showInformationMessage('Mermaid diagram copied to clipboard.');
+      return;
+    }
+
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    const defaultUri = workspaceFolder
+      ? vscode.Uri.joinPath(workspaceFolder.uri, 'ecosystem-graph.mmd')
+      : undefined;
+
+    const saveUri = await vscode.window.showSaveDialog({
+      defaultUri,
+      filters: { 'Mermaid': ['mmd'] },
+    });
+
+    if (!saveUri) {
+      return;
+    }
+
+    try {
+      await vscode.workspace.fs.writeFile(saveUri, Buffer.from(mermaid, 'utf-8'));
+      const savedFilename = saveUri.path.split('/').pop() || 'ecosystem-graph.mmd';
+      vscode.window.showInformationMessage(`Mermaid diagram saved to ${savedFilename}`);
+    } catch {
+      vscode.window.showWarningMessage('Failed to save Mermaid diagram.');
     }
   }
 

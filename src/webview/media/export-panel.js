@@ -185,6 +185,65 @@ function renderSnapshotSelector() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Export as Mermaid (Requirement 15)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Collect visible nodes and edges from the current graph data, respecting
+ * active filters, and send an exportMermaid message to the extension host.
+ *
+ * @param {object} vscodeApi - The VS Code webview API object
+ * @param {'clipboard'|'file'} action - Whether to copy or save
+ *
+ * Validates: Requirements 15.3, 15.5
+ */
+// eslint-disable-next-line no-unused-vars
+function triggerMermaidExport(vscodeApi, action) {
+  try {
+    // graphData is a global from webview.js containing current graph state
+    // eslint-disable-next-line no-undef
+    var data = typeof graphData !== 'undefined' ? graphData : null;
+    if (!data || !data.nodes) {
+      vscodeApi.postMessage({ type: 'exportMermaid', data: { nodes: [], edges: [] }, action: action });
+      return;
+    }
+
+    // Collect visible node IDs (respecting filters applied by filter-panel.js)
+    // eslint-disable-next-line no-undef
+    var visibleNodeIds = typeof filteredNodeIds !== 'undefined' ? filteredNodeIds : null;
+
+    var nodes = data.nodes;
+    var edges = data.links || data.edges || [];
+
+    if (visibleNodeIds && visibleNodeIds.size > 0) {
+      nodes = nodes.filter(function (n) { return visibleNodeIds.has(n.id); });
+      edges = edges.filter(function (e) {
+        var s = typeof e.source === 'object' ? e.source.id : e.source;
+        var t = typeof e.target === 'object' ? e.target.id : e.target;
+        return visibleNodeIds.has(s) && visibleNodeIds.has(t);
+      });
+    }
+
+    // Normalize edges to plain objects (force-graph may use object references)
+    var normalizedEdges = edges.map(function (e) {
+      return {
+        source: typeof e.source === 'object' ? e.source.id : e.source,
+        target: typeof e.target === 'object' ? e.target.id : e.target,
+        type: e.type || 'wiki-link',
+      };
+    });
+
+    vscodeApi.postMessage({
+      type: 'exportMermaid',
+      data: { nodes: nodes, edges: normalizedEdges },
+      action: action,
+    });
+  } catch (error) {
+    vscodeApi.postMessage({ type: 'exportMermaid', data: { nodes: [], edges: [] }, action: action });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // UI Buttons (Export PNG + Save Snapshot) — REMOVED
 // Buttons were removed to declutter the UI. Export/Snapshot functionality
 // remains available via the functions triggerExport() and triggerSnapshotSave()

@@ -722,7 +722,9 @@ export type WebviewMessage =
   | { type: 'fixIssue'; category: IssueCategory; issue: FixIssueData }
   | { type: 'fixAllCategory'; category: IssueCategory; issues: FixIssueData[] }
   // ─── Onboarding Wizard messages ───
-  | { type: 'createFromTemplate'; templateKey: string; fileName: string; targetDir: string };
+  | { type: 'createFromTemplate'; templateKey: string; fileName: string; targetDir: string }
+  // ─── Mermaid Export messages ───
+  | { type: 'exportMermaid'; data: { nodes: GraphNode[]; edges: GraphEdge[] }; action: 'clipboard' | 'file' };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Stats History (Temporal Evolution)
