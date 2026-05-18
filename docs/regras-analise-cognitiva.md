@@ -561,4 +561,47 @@ infrastructure: Nível 0 (Nenhum) — não relevante (sem conteúdo de infra)
 
 ---
 
-*Versão: 0.3.0 | 23 regras de análise*
+*Versão: 0.3.1 | 24 regras de análise*
+
+
+---
+
+### 24. Instruction Specificity Score (Sugestões de Melhoria)
+
+**O que verifica:** Se as instruções imperativas nos steerings são específicas (referenciando tecnologias concretas, paths, padrões de código ou critérios mensuráveis) ou vagas (frases genéricas como "follow best practices" sem detalhes acionáveis).
+
+**Por que importa:** Instruções vagas não dão ao agente AI uma direção clara. "Follow best practices" não diz ao agente O QUE fazer. "Use parameterized queries for all SQL" é acionável. Quanto mais específicas as instruções, mais previsível e confiável o comportamento do agente.
+
+**Algoritmo:**
+1. Para cada steering com linhas imperativas (já extraídas pelo ContentAnalyzer)
+2. Classificar cada linha como "específica" (tem pelo menos um marcador de especificidade) ou "vaga" (sem marcadores)
+3. Marcadores de especificidade: nomes de tecnologia (typescript, react, docker...), extensões de arquivo (.ts, .md...), prefixos de path (src/, dist/...), código entre backticks, identificadores camelCase/PascalCase, critérios mensuráveis (números + unidades/operadores)
+4. Score = linhas específicas / total de linhas imperativas × 100
+5. Sinalizar steerings com score < 50%
+
+**Padrões vagos detectados:**
+- "follow best practices", "ensure quality/security/performance"
+- "use proper/appropriate/good/correct X" (sem especificar o que X é)
+- "handle errors properly" (sem especificar como)
+- Subjects genéricos sozinhos: "validate", "check", "ensure" (sem objeto específico)
+
+**Importante:** Uma linha que corresponde a um padrão vago MAS também contém um marcador de especificidade é classificada como "específica" — o marcador sobrepõe o padrão vago.
+
+**Exemplo:**
+```
+code-conventions.md (steering-domain)
+  Linhas imperativas: 10 total
+  Específicas: "use typescript strict mode", "put files in src/", "keep functions under 30 lines" (3)
+  Vagas: "follow best practices", "ensure quality", "use proper handling" (7)
+  Score: 3/10 × 100 = 30%  →  SINALIZADO (< 50%)
+```
+
+**Importante:** Esta regra produz apenas SUGESTÕES, não erros. Os resultados NÃO afetam o Health Score.
+
+**Impacto:** O agente recebe instruções vagas que não consegue executar de forma confiável. Instruções específicas produzem comportamento consistente e previsível.
+
+**Como melhorar:**
+- Substitua "follow best practices" por "use eslint with the airbnb config"
+- Substitua "ensure quality" por "run `npm test` and verify 80% coverage"
+- Substitua "handle errors properly" por "wrap in try/catch and log to stderr with stack trace"
+- Adicione nomes de tecnologia, paths de arquivo, exemplos de código ou thresholds mensuráveis a cada instrução

@@ -10,6 +10,10 @@ import {
   isHeaderOnTopic,
   tokenizeHeader,
   KEYWORD_SETS,
+  hasSpecificityMarker,
+  isVagueInstruction,
+  computeSpecificityScore,
+  analyzeInstructionSpecificity,
 } from '../../services/cognitiveValidations';
 import type { GraphNode, GraphEdge, NodeType } from '../../types';
 
@@ -1089,5 +1093,226 @@ describe('CognitiveValidations — analyzeGuardrailCoverage()', function () {
     const relevant = result.categories.filter((c) => c.isRelevant);
     const expected = relevant.reduce((s, c) => s + c.maturityLevel, 0) / relevant.length;
     assert.strictEqual(result.overallMaturity, expected);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Instruction Specificity (Rule 24)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('CognitiveValidations — hasSpecificityMarker()', function () {
+  it('detects technology names: "use typescript strict mode" → true', function () {
+    assert.strictEqual(hasSpecificityMarker('use typescript strict mode'), true);
+  });
+
+  it('detects file extensions: "create a .ts file" → true', function () {
+    assert.strictEqual(hasSpecificityMarker('create a .ts file'), true);
+  });
+
+  it('detects path prefixes: "put files in src/" → true', function () {
+    assert.strictEqual(hasSpecificityMarker('put files in src/'), true);
+  });
+
+  it('detects backtick code: "use `parameterizedQuery()`" → true', function () {
+    assert.strictEqual(hasSpecificityMarker('use `parameterizedQuery()`'), true);
+  });
+
+  it('detects camelCase identifiers: "call getUserName" → true', function () {
+    assert.strictEqual(hasSpecificityMarker('call getUserName'), true);
+  });
+
+  it('detects PascalCase identifiers: "extend BaseController" → true', function () {
+    assert.strictEqual(hasSpecificityMarker('extend BaseController'), true);
+  });
+
+  it('detects measurable criteria: "keep functions under 30 lines" → true', function () {
+    assert.strictEqual(hasSpecificityMarker('keep functions under 30 lines'), true);
+  });
+
+  it('detects measurable operator criteria: "response time < 200" → true', function () {
+    assert.strictEqual(hasSpecificityMarker('response time < 200'), true);
+  });
+
+  it('returns false for purely vague line: "follow best practices" → false', function () {
+    assert.strictEqual(hasSpecificityMarker('follow best practices'), false);
+  });
+
+  it('returns false for generic instruction: "ensure quality" → false', function () {
+    assert.strictEqual(hasSpecificityMarker('ensure quality'), false);
+  });
+});
+
+describe('CognitiveValidations — isVagueInstruction()', function () {
+  it('"follow best practices" → true (vague)', function () {
+    assert.strictEqual(isVagueInstruction('follow best practices'), true);
+  });
+
+  it('"ensure quality" → true (vague)', function () {
+    assert.strictEqual(isVagueInstruction('ensure quality'), true);
+  });
+
+  it('"use proper handling" → true (vague)', function () {
+    assert.strictEqual(isVagueInstruction('use proper handling'), true);
+  });
+
+  it('"follow best practices using eslint" → false (has marker)', function () {
+    assert.strictEqual(isVagueInstruction('follow best practices using eslint'), false);
+  });
+
+  it('"use typescript strict mode" → false (specific)', function () {
+    assert.strictEqual(isVagueInstruction('use typescript strict mode'), false);
+  });
+
+  it('"validate" alone → true (generic subject)', function () {
+    assert.strictEqual(isVagueInstruction('validate'), true);
+  });
+
+  it('"validate using zod schema" → false (has marker)', function () {
+    assert.strictEqual(isVagueInstruction('validate using eslint rules'), false);
+  });
+});
+
+describe('CognitiveValidations — computeSpecificityScore()', function () {
+  it('returns 100 for empty array', function () {
+    assert.strictEqual(computeSpecificityScore([]), 100);
+  });
+
+  it('returns 0 when all lines are vague', function () {
+    const lines = [
+      { text: 'follow best practices' },
+      { text: 'ensure quality' },
+    ];
+    assert.strictEqual(computeSpecificityScore(lines), 0);
+  });
+
+  it('returns 50 when half are specific', function () {
+    const lines = [
+      { text: 'use typescript strict mode' },
+      { text: 'follow best practices' },
+    ];
+    assert.strictEqual(computeSpecificityScore(lines), 50);
+  });
+
+  it('returns 100 when all are specific', function () {
+    const lines = [
+      { text: 'use typescript strict mode' },
+      { text: 'put files in src/' },
+    ];
+    assert.strictEqual(computeSpecificityScore(lines), 100);
+  });
+});
+
+describe('CognitiveValidations — analyzeInstructionSpecificity()', function () {
+  it('alerts only contain steerings with score < 50', function () {
+    const nodes: GraphNode[] = [
+      makeNode('vague.md', {
+        type: 'steering-domain',
+        metadata: {
+          imperativeLines: [
+            { text: 'follow best practices', pattern: 'use', subject: 'practices' },
+            { text: 'ensure quality', pattern: 'ensure', subject: 'quality' },
+          ],
+        },
+      }),
+      makeNode('specific.md', {
+        type: 'steering-tech',
+        metadata: {
+          imperativeLines: [
+            { text: 'use typescript strict mode', pattern: 'use', subject: 'typescript' },
+            { text: 'put files in src/', pattern: 'use', subject: 'files' },
+          ],
+        },
+      }),
+    ];
+    const result = analyzeInstructionSpecificity(nodes);
+    assert.strictEqual(result.alerts.length, 1);
+    assert.strictEqual(result.alerts[0].id, 'vague.md');
+    assert.strictEqual(result.alerts[0].score, 0);
+  });
+
+  it('ignores hook and skill nodes', function () {
+    const nodes: GraphNode[] = [
+      makeNode('hook.json', {
+        type: 'hook-auto',
+        metadata: {
+          imperativeLines: [
+            { text: 'follow best practices', pattern: 'use', subject: 'practices' },
+          ],
+        },
+      }),
+      makeNode('skill.md', {
+        type: 'skill' as NodeType,
+        metadata: {
+          imperativeLines: [
+            { text: 'ensure quality', pattern: 'ensure', subject: 'quality' },
+          ],
+        },
+      }),
+    ];
+    const result = analyzeInstructionSpecificity(nodes);
+    assert.strictEqual(result.alerts.length, 0);
+    assert.strictEqual(result.averageScore, 100);
+  });
+
+  it('steerings without imperativeLines do not appear in alerts', function () {
+    const nodes: GraphNode[] = [
+      makeNode('empty.md', { type: 'steering-domain', metadata: {} }),
+      makeNode('no-lines.md', { type: 'steering-tech', metadata: { imperativeLines: [] } }),
+    ];
+    const result = analyzeInstructionSpecificity(nodes);
+    assert.strictEqual(result.alerts.length, 0);
+    assert.strictEqual(result.averageScore, 100);
+  });
+
+  it('vagueExamples has at most 3 items', function () {
+    const lines = Array.from({ length: 10 }, (_, i) => ({
+      text: 'follow best practices ' + i,
+      pattern: 'use',
+      subject: 'practices',
+    }));
+    const nodes: GraphNode[] = [
+      makeNode('many-vague.md', {
+        type: 'steering-domain',
+        metadata: { imperativeLines: lines },
+      }),
+    ];
+    const result = analyzeInstructionSpecificity(nodes);
+    assert.strictEqual(result.alerts.length, 1);
+    assert.ok(result.alerts[0].vagueExamples.length <= 3);
+  });
+
+  it('vagueCount + specificCount === total imperative lines', function () {
+    const nodes: GraphNode[] = [
+      makeNode('mixed.md', {
+        type: 'steering-domain',
+        metadata: {
+          imperativeLines: [
+            { text: 'follow best practices', pattern: 'use', subject: 'practices' },
+            { text: 'use typescript', pattern: 'use', subject: 'typescript' },
+            { text: 'ensure quality', pattern: 'ensure', subject: 'quality' },
+          ],
+        },
+      }),
+    ];
+    const result = analyzeInstructionSpecificity(nodes);
+    assert.strictEqual(result.alerts.length, 1);
+    const alert = result.alerts[0];
+    assert.strictEqual(alert.vagueCount + alert.specificCount, 3);
+  });
+
+  it('averageScore is computed only over steerings with imperativeLines', function () {
+    const nodes: GraphNode[] = [
+      makeNode('empty.md', { type: 'steering-domain', metadata: {} }),
+      makeNode('specific.md', {
+        type: 'steering-tech',
+        metadata: {
+          imperativeLines: [
+            { text: 'use typescript strict mode', pattern: 'use', subject: 'typescript' },
+          ],
+        },
+      }),
+    ];
+    const result = analyzeInstructionSpecificity(nodes);
+    assert.strictEqual(result.averageScore, 100);
   });
 });

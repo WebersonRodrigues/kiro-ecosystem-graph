@@ -27,6 +27,8 @@ import type {
   GuardrailCategoryResult,
   GuardrailSuggestion,
   GuardrailCoverageResult,
+  InstructionSpecificityAlert,
+  InstructionSpecificityResult,
 } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1562,5 +1564,202 @@ function computeOverallMaturity(categories: GuardrailCategoryResult[]): number {
   if (relevant.length === 0) { return 0; }
   const sum = relevant.reduce((acc, c) => acc + c.maturityLevel, 0);
   return sum / relevant.length;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Instruction Specificity Score (Rule 24)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Technology names that indicate specific instructions */
+const TECHNOLOGY_MARKERS: string[] = [
+  'typescript', 'javascript', 'react', 'angular', 'vue', 'svelte',
+  'node', 'express', 'fastify', 'nest', 'next', 'nuxt',
+  'sql', 'postgres', 'mysql', 'mongodb', 'redis', 'dynamodb',
+  'docker', 'kubernetes', 'terraform', 'aws', 'azure', 'gcp',
+  'python', 'java', 'rust', 'go', 'ruby', 'php', 'csharp',
+  'webpack', 'esbuild', 'vite', 'rollup', 'parcel',
+  'eslint', 'prettier', 'jest', 'mocha', 'vitest', 'cypress',
+  'git', 'github', 'gitlab', 'npm', 'yarn', 'pnpm',
+  'rest', 'graphql', 'grpc', 'websocket', 'http', 'https',
+  'json', 'yaml', 'toml', 'xml', 'csv', 'markdown',
+];
+
+/** File extension patterns that indicate specific instructions */
+const FILE_EXTENSION_MARKERS: string[] = [
+  '.ts', '.js', '.tsx', '.jsx', '.py', '.java', '.rs', '.go',
+  '.md', '.json', '.yaml', '.yml', '.toml', '.xml', '.html', '.css',
+  '.env', '.config', '.lock', '.sql', '.sh', '.dockerfile',
+];
+
+/** Path prefix patterns that indicate specific instructions */
+const PATH_PREFIX_MARKERS: string[] = [
+  'src/', 'dist/', 'test/', 'tests/', 'lib/', 'bin/',
+  'config/', 'scripts/', '.kiro/', '.github/', '.vscode/',
+  'node_modules/', 'packages/', 'apps/',
+];
+
+/** Vague instruction patterns (case-insensitive substring matching) */
+const VAGUE_PATTERNS: string[] = [
+  'best practices',
+  'proper handling',
+  'appropriate measures',
+  'good code',
+  'clean code',
+  'proper way',
+  'appropriate way',
+  'correct way',
+  'handle errors properly',
+  'ensure quality',
+  'ensure security',
+  'ensure performance',
+  'maintain quality',
+  'follow standards',
+  'follow conventions',
+  'use proper',
+  'use appropriate',
+  'use good',
+  'use correct',
+];
+
+/** Generic imperative subjects (vague when alone without specificity marker) */
+const GENERIC_SUBJECTS: string[] = [
+  'validate', 'check', 'verify', 'ensure', 'handle',
+  'process', 'manage', 'maintain', 'review', 'monitor',
+];
+
+/** Pre-compiled regex for camelCase identifiers (2+ words) */
+const CAMEL_CASE_RE = /[a-z][a-zA-Z]*[A-Z][a-zA-Z]*/;
+
+/** Pre-compiled regex for PascalCase identifiers (2+ words) */
+const PASCAL_CASE_RE = /[A-Z][a-z]+[A-Z][a-zA-Z]*/;
+
+/** Pre-compiled regex for measurable criteria with units */
+const MEASURABLE_UNIT_RE = /\b\d+\s*(ms|s|lines?|words?|chars?|bytes?|kb|mb|%)\b/i;
+
+/** Pre-compiled regex for measurable criteria with operators */
+const MEASURABLE_OP_RE = /[<>=!]+\s*\d+/;
+
+/**
+ * Checks if a line contains at least one specificity marker.
+ * Markers: technology names, file extensions, path prefixes,
+ * backtick code, camelCase/PascalCase, measurable criteria.
+ */
+export function hasSpecificityMarker(lineText: string): boolean {
+  if (hasTechnologyMarker(lineText)) { return true; }
+  if (hasFileOrPathMarker(lineText)) { return true; }
+  if (hasCodePatternMarker(lineText)) { return true; }
+  if (hasMeasurableMarker(lineText)) { return true; }
+  return false;
+}
+
+function hasTechnologyMarker(lineText: string): boolean {
+  const lower = lineText.toLowerCase();
+  const words = lower.split(/[^a-z0-9]+/).filter((w) => w.length > 0);
+  return TECHNOLOGY_MARKERS.some((tech) => words.includes(tech));
+}
+
+function hasFileOrPathMarker(lineText: string): boolean {
+  const lower = lineText.toLowerCase();
+  const hasExtension = FILE_EXTENSION_MARKERS.some((ext) => lower.includes(ext));
+  if (hasExtension) { return true; }
+  return PATH_PREFIX_MARKERS.some((prefix) => lower.includes(prefix));
+}
+
+function hasCodePatternMarker(lineText: string): boolean {
+  if (lineText.includes('`')) { return true; }
+  if (CAMEL_CASE_RE.test(lineText)) { return true; }
+  if (PASCAL_CASE_RE.test(lineText)) { return true; }
+  return false;
+}
+
+function hasMeasurableMarker(lineText: string): boolean {
+  if (MEASURABLE_UNIT_RE.test(lineText)) { return true; }
+  return MEASURABLE_OP_RE.test(lineText);
+}
+
+/**
+ * Checks if a line is a vague instruction: matches a vague pattern
+ * AND does not contain any specificity marker.
+ */
+export function isVagueInstruction(lineText: string): boolean {
+  if (hasSpecificityMarker(lineText)) { return false; }
+  if (matchesVaguePattern(lineText)) { return true; }
+  return matchesGenericSubject(lineText);
+}
+
+function matchesVaguePattern(lineText: string): boolean {
+  const lower = lineText.toLowerCase();
+  return VAGUE_PATTERNS.some((pattern) => lower.includes(pattern));
+}
+
+function matchesGenericSubject(lineText: string): boolean {
+  const words = lineText.toLowerCase().split(/\s+/);
+  if (words.length > 4) { return false; }
+  return GENERIC_SUBJECTS.some((subject) => words.includes(subject));
+}
+
+/**
+ * Computes specificity score for a set of imperative lines.
+ * Score = Math.round(specificCount / total * 100).
+ * Returns 100 for empty arrays.
+ */
+export function computeSpecificityScore(
+  imperativeLines: { text: string }[],
+): number {
+  if (imperativeLines.length === 0) { return 100; }
+  let specificCount = 0;
+  for (const line of imperativeLines) {
+    if (hasSpecificityMarker(line.text)) { specificCount++; }
+  }
+  return Math.round((specificCount / imperativeLines.length) * 100);
+}
+
+/**
+ * Analyzes instruction specificity across all steering nodes.
+ * Returns alerts for steerings with score < 50 and the average score.
+ */
+export function analyzeInstructionSpecificity(
+  nodes: GraphNode[],
+): InstructionSpecificityResult {
+  const alerts: InstructionSpecificityAlert[] = [];
+  let totalScore = 0;
+  let analyzedCount = 0;
+
+  for (const node of nodes) {
+    if (!node.type || !node.type.startsWith('steering-')) { continue; }
+    const lines = node.metadata?.imperativeLines;
+    if (!lines || lines.length === 0) { continue; }
+
+    analyzedCount++;
+    const score = computeSpecificityScore(lines);
+    totalScore += score;
+
+    if (score < 50) {
+      const alert = buildSpecificityAlert(node, lines, score);
+      alerts.push(alert);
+    }
+  }
+
+  const averageScore = analyzedCount > 0
+    ? Math.round(totalScore / analyzedCount)
+    : 100;
+
+  return { alerts, averageScore };
+}
+
+function buildSpecificityAlert(
+  node: GraphNode,
+  lines: { text: string }[],
+  score: number,
+): InstructionSpecificityAlert {
+  const vagueLines = lines.filter((l) => !hasSpecificityMarker(l.text));
+  return {
+    id: node.id,
+    label: node.label,
+    score,
+    vagueCount: vagueLines.length,
+    specificCount: lines.length - vagueLines.length,
+    vagueExamples: vagueLines.slice(0, 3).map((l) => l.text),
+  };
 }
 

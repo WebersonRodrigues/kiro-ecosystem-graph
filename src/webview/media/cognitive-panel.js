@@ -1167,6 +1167,87 @@ var CognitivePanel = (function () {
     return { categories: categories, overallMaturity: overallMaturity };
   }
 
+  // ─── Instruction Specificity (Rule 24) ─────────────────────────────────
+
+  var TECHNOLOGY_MARKERS_WV = [
+    'typescript', 'javascript', 'react', 'angular', 'vue', 'svelte',
+    'node', 'express', 'fastify', 'nest', 'next', 'nuxt',
+    'sql', 'postgres', 'mysql', 'mongodb', 'redis', 'dynamodb',
+    'docker', 'kubernetes', 'terraform', 'aws', 'azure', 'gcp',
+    'python', 'java', 'rust', 'go', 'ruby', 'php', 'csharp',
+    'webpack', 'esbuild', 'vite', 'rollup', 'parcel',
+    'eslint', 'prettier', 'jest', 'mocha', 'vitest', 'cypress',
+    'git', 'github', 'gitlab', 'npm', 'yarn', 'pnpm',
+    'rest', 'graphql', 'grpc', 'websocket', 'http', 'https',
+    'json', 'yaml', 'toml', 'xml', 'csv', 'markdown',
+  ];
+
+  var FILE_EXTENSION_MARKERS_WV = [
+    '.ts', '.js', '.tsx', '.jsx', '.py', '.java', '.rs', '.go',
+    '.md', '.json', '.yaml', '.yml', '.toml', '.xml', '.html', '.css',
+    '.env', '.config', '.lock', '.sql', '.sh', '.dockerfile',
+  ];
+
+  var PATH_PREFIX_MARKERS_WV = [
+    'src/', 'dist/', 'test/', 'tests/', 'lib/', 'bin/',
+    'config/', 'scripts/', '.kiro/', '.github/', '.vscode/',
+    'node_modules/', 'packages/', 'apps/',
+  ];
+
+  var CAMEL_CASE_RE_WV = /[a-z][a-zA-Z]*[A-Z][a-zA-Z]*/;
+  var PASCAL_CASE_RE_WV = /[A-Z][a-z]+[A-Z][a-zA-Z]*/;
+  var MEASURABLE_UNIT_RE_WV = /\b\d+\s*(ms|s|lines?|words?|chars?|bytes?|kb|mb|%)\b/i;
+  var MEASURABLE_OP_RE_WV = /[<>=!]+\s*\d+/;
+
+  function hasSpecificityMarkerWv(lineText) {
+    var lower = lineText.toLowerCase();
+    var words = lower.split(/[^a-z0-9]+/).filter(function(w) { return w.length > 0; });
+    if (TECHNOLOGY_MARKERS_WV.some(function(t) { return words.indexOf(t) !== -1; })) { return true; }
+    if (FILE_EXTENSION_MARKERS_WV.some(function(ext) { return lower.indexOf(ext) !== -1; })) { return true; }
+    if (PATH_PREFIX_MARKERS_WV.some(function(p) { return lower.indexOf(p) !== -1; })) { return true; }
+    if (lineText.indexOf('`') !== -1) { return true; }
+    if (CAMEL_CASE_RE_WV.test(lineText)) { return true; }
+    if (PASCAL_CASE_RE_WV.test(lineText)) { return true; }
+    if (MEASURABLE_UNIT_RE_WV.test(lineText)) { return true; }
+    if (MEASURABLE_OP_RE_WV.test(lineText)) { return true; }
+    return false;
+  }
+
+  function analyzeInstructionSpecificityWebview(nodes) {
+    var alerts = [];
+    var totalScore = 0;
+    var analyzedCount = 0;
+
+    nodes.forEach(function(n) {
+      if (!n.type || n.type.indexOf('steering-') !== 0) { return; }
+      var lines = n.metadata && n.metadata.imperativeLines;
+      if (!lines || lines.length === 0) { return; }
+
+      analyzedCount++;
+      var specificCount = 0;
+      for (var i = 0; i < lines.length; i++) {
+        if (hasSpecificityMarkerWv(lines[i].text)) { specificCount++; }
+      }
+      var score = Math.round((specificCount / lines.length) * 100);
+      totalScore += score;
+
+      if (score < 50) {
+        var vagueLines = lines.filter(function(l) { return !hasSpecificityMarkerWv(l.text); });
+        alerts.push({
+          id: n.id,
+          label: n.label,
+          score: score,
+          vagueCount: vagueLines.length,
+          specificCount: specificCount,
+          vagueExamples: vagueLines.slice(0, 3).map(function(l) { return l.text; }),
+        });
+      }
+    });
+
+    var averageScore = analyzedCount > 0 ? Math.round(totalScore / analyzedCount) : 100;
+    return { alerts: alerts, averageScore: averageScore };
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Health Score Computation
   // ─────────────────────────────────────────────────────────────────────────
@@ -1462,6 +1543,9 @@ var CognitivePanel = (function () {
     // 16. Guardrail Coverage Analysis (Rule 23)
     var guardrailCoverage = analyzeGuardrailCoverageWebview(data.nodes, dmlProtection.maturityLevel);
 
+    // 17. Instruction Specificity Score (Rule 24)
+    var instructionSpecificity = analyzeInstructionSpecificityWebview(data.nodes);
+
     // 11. Cross-Workspace Topology: group external nodes by workspace
     var crossWorkspaceTopology = [];
     var workspaceGroups = {};
@@ -1563,6 +1647,7 @@ var CognitivePanel = (function () {
       semanticCoherence: semanticCoherence,
       circularHookDependencies: circularHookDependencies,
       guardrailCoverage: guardrailCoverage,
+      instructionSpecificity: instructionSpecificity,
       healthScore: computeHealthScore({
         steeringsSoltos: steeringsSoltos,
         vinculosFrageis: vinculosFrageis,
@@ -2201,6 +2286,26 @@ var CognitivePanel = (function () {
         });
         html += '</div>';
       }
+    }
+
+    // Instruction Specificity (Rule 24)
+    if (analysis.instructionSpecificity && analysis.instructionSpecificity.alerts && analysis.instructionSpecificity.alerts.length > 0) {
+      html += '<div style="margin-bottom:6px;border-top:1px solid #333;padding-top:6px;">';
+      html += '<span style="color:#42A5F5;font-weight:bold;">\uD83C\uDFAF Instruction Specificity</span>';
+      html += ' <span style="color:#42A5F5;">' + analysis.instructionSpecificity.alerts.length + '</span>';
+      analysis.instructionSpecificity.alerts.forEach(function(alert) {
+        html += '<div style="padding-left:6px;color:#90CAF9;font-size:9px;">';
+        html += '<strong>' + escapeHtml(alert.label) + '</strong>';
+        html += ' <span style="color:#64B5F6;">score: ' + alert.score + '%</span>';
+        html += ' <span style="color:#666;">vague: ' + alert.vagueCount + '</span>';
+        if (alert.vagueExamples && alert.vagueExamples.length > 0) {
+          alert.vagueExamples.forEach(function(ex) {
+            html += '<div style="padding-left:10px;color:#78909C;font-size:8px;font-style:italic;">\u2022 ' + escapeHtml(ex) + '</div>';
+          });
+        }
+        html += '</div>';
+      });
+      html += '</div>';
     }
 
     // Suggestions

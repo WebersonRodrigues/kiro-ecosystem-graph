@@ -508,7 +508,7 @@ review-hook.json (hook-auto) → code-conventions.md (steering-policy) → lint-
 
 ---
 
-*Version: 0.3.0 | 23 analysis rules*
+*Version: 0.3.1 | 24 analysis rules*
 
 
 ---
@@ -561,3 +561,46 @@ infrastructure: Level 0 (None) — not relevant (no infra-related content)
 1. For missing hooks: Create a `preToolUse` or `postToolUse` hook with relevant toolTypes
 2. For missing steerings: Create a steering with protection rules and decision criteria
 3. For missing both: Start with the steering (criteria), then add the hook (enforcement)
+
+
+---
+
+### 24. Instruction Specificity Score (Improvement Suggestions)
+
+**What it checks:** Whether imperative instructions in steerings are specific (referencing concrete technologies, paths, code patterns, or measurable criteria) or vague (generic phrases like "follow best practices" without actionable detail).
+
+**Why it matters:** Vague instructions give the AI agent no clear direction. "Follow best practices" doesn't tell the agent WHAT to do. "Use parameterized queries for all SQL" is actionable. The more specific the instructions, the more predictable and reliable the agent's behavior.
+
+**Algorithm:**
+1. For each steering with imperative lines (already extracted by ContentAnalyzer)
+2. Classify each line as "specific" (has at least one specificity marker) or "vague" (no markers)
+3. Specificity markers: technology names (typescript, react, docker...), file extensions (.ts, .md...), path prefixes (src/, dist/...), backtick code, camelCase/PascalCase identifiers, measurable criteria (numbers + units/operators)
+4. Score = specific lines / total imperative lines × 100
+5. Flag steerings with score < 50%
+
+**Vague patterns detected:**
+- "follow best practices", "ensure quality/security/performance"
+- "use proper/appropriate/good/correct X" (without specifying what X is)
+- "handle errors properly" (without specifying how)
+- Generic subjects alone: "validate", "check", "ensure" (without a specific object)
+
+**Important:** A line matching a vague pattern BUT also containing a specificity marker is classified as "specific" — the marker overrides the vague pattern.
+
+**Example:**
+```
+code-conventions.md (steering-domain)
+  Imperative lines: 10 total
+  Specific: "use typescript strict mode", "put files in src/", "keep functions under 30 lines" (3)
+  Vague: "follow best practices", "ensure quality", "use proper handling" (7)
+  Score: 3/10 × 100 = 30%  →  FLAGGED (< 50%)
+```
+
+**Important:** This rule produces SUGGESTIONS only, not errors. Results do NOT affect the Health Score.
+
+**Impact:** The agent receives vague instructions it cannot act on reliably. Specific instructions produce consistent, predictable behavior.
+
+**How to improve:**
+- Replace "follow best practices" with "use eslint with the airbnb config"
+- Replace "ensure quality" with "run `npm test` and verify 80% coverage"
+- Replace "handle errors properly" with "wrap in try/catch and log to stderr with stack trace"
+- Add technology names, file paths, code examples, or measurable thresholds to every instruction

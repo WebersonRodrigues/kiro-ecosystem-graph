@@ -404,6 +404,9 @@ export interface CognitiveAnalysisResult {
 
   /** Guardrail coverage analysis — improvement suggestions (Rule 23) */
   guardrailCoverage?: GuardrailCoverageResult;
+
+  /** Instruction specificity analysis — improvement suggestions (Rule 24) */
+  instructionSpecificity?: InstructionSpecificityResult;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -466,6 +469,34 @@ export interface CircularHookDependency {
   nodes: { id: string; label: string; type: string }[];
   /** Number of nodes in the cycle */
   cycleLength: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Instruction Specificity Score Types (Rule 24)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A steering flagged for vague instructions (specificity < 50%) */
+export interface InstructionSpecificityAlert {
+  /** Node ID (relative path) */
+  id: string;
+  /** Display label */
+  label: string;
+  /** Specificity score (0-100) */
+  score: number;
+  /** Count of vague imperative lines */
+  vagueCount: number;
+  /** Count of specific imperative lines */
+  specificCount: number;
+  /** Up to 3 example vague lines for display */
+  vagueExamples: string[];
+}
+
+/** Complete instruction specificity analysis result */
+export interface InstructionSpecificityResult {
+  /** Steerings with specificity score < 50 */
+  alerts: InstructionSpecificityAlert[];
+  /** Average specificity score across all analyzed steerings (0-100) */
+  averageScore: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

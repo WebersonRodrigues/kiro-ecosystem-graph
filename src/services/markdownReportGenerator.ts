@@ -45,6 +45,7 @@ export function generateCognitiveReport(
   appendSemanticCoherence(lines, data);
   appendCircularHookDependencies(lines, data);
   appendGuardrailSuggestions(lines, data);
+  appendInstructionSpecificity(lines, data);
   appendRecommendations(lines, data);
   appendInstructionsForAI(lines, data);
 
@@ -494,6 +495,25 @@ function formatPresent(hasHook: boolean, hasSteering: boolean): string {
   return 'none';
 }
 
+function appendInstructionSpecificity(lines: string[], data: CognitiveAnalysisResult): void {
+  const specificity = data.instructionSpecificity;
+  if (!specificity || specificity.alerts.length === 0) { return; }
+
+  lines.push('## Instruction Specificity');
+  lines.push('');
+  lines.push('> These are improvement suggestions, not problems. They do not affect the Health Score.');
+  lines.push('');
+  lines.push('Steerings with vague instructions (specificity score < 50%) — consider making them more specific.');
+  lines.push('');
+  lines.push('| Steering | Score | Vague Lines | Example Vague Instructions |');
+  lines.push('|----------|-------|-------------|---------------------------|');
+  for (const alert of specificity.alerts) {
+    const examples = alert.vagueExamples.join('; ');
+    lines.push(`| ${alert.label} | ${alert.score}% | ${alert.vagueCount} | ${examples} |`);
+  }
+  lines.push('');
+}
+
 function appendRecommendations(lines: string[], data: CognitiveAnalysisResult): void {
   if (data.sugestoes.length === 0) { return; }
   lines.push('## Recommendations');
@@ -582,6 +602,9 @@ function appendInstructionsForAI(lines: string[], data: CognitiveAnalysisResult)
     if (hasSuggestions) {
       lines.push(`${step++}. Consider implementing Guardrail Suggestions as optional improvements to strengthen ecosystem protection.`);
     }
+  }
+  if (data.instructionSpecificity && data.instructionSpecificity.alerts.length > 0) {
+    lines.push(`${step++}. Consider making vague instructions more specific as optional improvements (Instruction Specificity suggestions).`);
   }
 
   lines.push('');

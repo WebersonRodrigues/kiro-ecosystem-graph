@@ -522,3 +522,68 @@ describe('MarkdownReportGenerator', function () {
       assert.ok(report.includes('These are improvement suggestions, not problems. They do not affect the Health Score.'));
     });
   });
+
+  describe('Instruction Specificity section', function () {
+    it('generates section with valid alerts', function () {
+      const data = createMinimalResult();
+      data.instructionSpecificity = {
+        alerts: [
+          {
+            id: 'vague.md',
+            label: 'vague',
+            score: 30,
+            vagueCount: 7,
+            specificCount: 3,
+            vagueExamples: ['follow best practices', 'ensure quality', 'use proper handling'],
+          },
+        ],
+        averageScore: 65,
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('## Instruction Specificity'));
+      assert.ok(report.includes('These are improvement suggestions, not problems'));
+      assert.ok(report.includes('| vague | 30% | 7 |'));
+      assert.ok(report.includes('follow best practices'));
+    });
+
+    it('omits section when instructionSpecificity is undefined', function () {
+      const data = createMinimalResult();
+      const report = generateCognitiveReport(data);
+      assert.ok(!report.includes('## Instruction Specificity'));
+    });
+
+    it('omits section when no alerts exist', function () {
+      const data = createMinimalResult();
+      data.instructionSpecificity = { alerts: [], averageScore: 100 };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(!report.includes('## Instruction Specificity'));
+    });
+
+    it('informational note is present in header', function () {
+      const data = createMinimalResult();
+      data.instructionSpecificity = {
+        alerts: [
+          { id: 'a.md', label: 'a', score: 20, vagueCount: 4, specificCount: 1, vagueExamples: ['ensure quality'] },
+        ],
+        averageScore: 20,
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('These are improvement suggestions, not problems. They do not affect the Health Score.'));
+    });
+
+    it('Instructions for AI includes instruction specificity step', function () {
+      const data = createMinimalResult();
+      data.instructionSpecificity = {
+        alerts: [
+          { id: 'a.md', label: 'a', score: 20, vagueCount: 4, specificCount: 1, vagueExamples: ['ensure quality'] },
+        ],
+        averageScore: 20,
+      };
+
+      const report = generateCognitiveReport(data);
+      assert.ok(report.includes('Consider making vague instructions more specific'));
+    });
+  });
