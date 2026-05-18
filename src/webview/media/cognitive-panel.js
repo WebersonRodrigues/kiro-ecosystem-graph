@@ -1172,8 +1172,195 @@ var CognitivePanel = (function () {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Fix Button Styles (injected once)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  var fixStyleEl = document.createElement('style');
+  fixStyleEl.textContent = [
+    '.fix-btn {',
+    '  background: transparent;',
+    '  color: #666;',
+    '  border: 1px solid #444;',
+    '  border-radius: 2px;',
+    '  font-size: 8px;',
+    '  padding: 1px 4px;',
+    '  cursor: pointer;',
+    '  margin-left: 4px;',
+    '}',
+    '.fix-btn:hover {',
+    '  color: #4A9EFF;',
+    '  border-color: #4A9EFF;',
+    '}',
+    '.fix-all-btn {',
+    '  background: transparent;',
+    '  color: #666;',
+    '  border: 1px solid #444;',
+    '  border-radius: 2px;',
+    '  font-size: 8px;',
+    '  padding: 1px 4px;',
+    '  cursor: pointer;',
+    '  margin-left: 4px;',
+    '}',
+    '.fix-all-btn:hover {',
+    '  color: #FF9800;',
+    '  border-color: #FF9800;',
+    '}',
+  ].join('\n');
+  document.head.appendChild(fixStyleEl);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Fix Button Helpers
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Create a Fix button for a single issue.
+   * @param {string} category - The issue category (e.g. 'orphan-steerings')
+   * @param {object} issueData - The FixIssueData object { ids, labels, extra }
+   * @returns {HTMLButtonElement}
+   */
+  function createFixButton(category, issueData) {
+    var btn = document.createElement('button');
+    btn.className = 'fix-btn';
+    btn.textContent = 'Fix';
+    btn.title = 'Gerar prompt de correção';
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (typeof vscode !== 'undefined') {
+        vscode.postMessage({ type: 'fixIssue', category: category, issue: issueData });
+      }
+    });
+    return btn;
+  }
+
+  /**
+   * Create a Fix All button for an entire category.
+   * @param {string} category - The issue category
+   * @param {object[]} allIssuesData - Array of FixIssueData objects
+   * @returns {HTMLButtonElement}
+   */
+  function createFixAllButton(category, allIssuesData) {
+    var btn = document.createElement('button');
+    btn.className = 'fix-all-btn';
+    btn.textContent = 'Fix All';
+    btn.title = 'Gerar prompt para todas as issues desta categoria';
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (typeof vscode !== 'undefined') {
+        vscode.postMessage({ type: 'fixAllCategory', category: category, issues: allIssuesData });
+      }
+    });
+    return btn;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Panel Rendering
   // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Build the full array of FixIssueData for a category (all items, not sliced).
+   * Used by Fix All buttons to send complete data to the extension host.
+   * @param {string} category
+   * @param {object} analysis
+   * @returns {object[]}
+   */
+  function buildFullIssuesData(category, analysis) {
+    switch (category) {
+    case 'orphan-steerings':
+      return analysis.steeringsSoltos.map(function(item) {
+        return { ids: [item.id], labels: [item.label] };
+      });
+    case 'fragile-links':
+      return analysis.vinculosFrageis.map(function(item) {
+        return { ids: [item.source, item.target], labels: [item.sourceLabel, item.targetLabel] };
+      });
+    case 'isolated-files':
+      return analysis.arquivosSemContexto.map(function(item) {
+        return { ids: [item.id], labels: [item.label], extra: { type: item.type } };
+      });
+    case 'coverage-gaps':
+      return analysis.coverageGaps.map(function(item) {
+        return { ids: [item.folder], labels: [item.folder] };
+      });
+    case 'weak-instructions':
+      return analysis.weakInstructions.map(function(item) {
+        return { ids: [item.id], labels: [item.label], extra: { lines: item.lineCount } };
+      });
+    case 'context-overload':
+      return analysis.contextOverload.map(function(item) {
+        return { ids: [item.id], labels: [item.label], extra: { lines: item.lineCount } };
+      });
+    case 'hooks-without-instruction':
+      return analysis.hooksWithoutInstruction.map(function(item) {
+        return { ids: [item.id], labels: [item.label] };
+      });
+    case 'steerings-without-access':
+      return analysis.steeringsWithoutAccess.map(function(item) {
+        return { ids: [item.id], labels: [item.label], extra: { inclusion: item.inclusion } };
+      });
+    case 'dead-loops':
+      return (analysis.deadLoops || []).map(function(loop) {
+        return { ids: loop.nodes.map(function(n) { return n.id; }), labels: loop.nodes.map(function(n) { return n.label; }), extra: { nodes: loop.nodes.map(function(n) { return n.label; }).join(', ') } };
+      });
+    case 'hops-to-reach':
+      return (analysis.hopsToReach || []).map(function(item) {
+        return { ids: [item.id], labels: [item.label], extra: { hops: item.hops } };
+      });
+    case 'duplicate-intent':
+      return (analysis.duplicateIntent || []).map(function(pair) {
+        return { ids: [pair.nodeA.id, pair.nodeB.id], labels: [pair.nodeA.label, pair.nodeB.label], extra: { overlap: pair.overlap } };
+      });
+    case 'passive-knowledge':
+      return (analysis.passiveKnowledge || []).map(function(item) {
+        return { ids: [item.id], labels: [item.label], extra: { actionable: item.actionablePercent } };
+      });
+    case 'signal-to-noise':
+      return (analysis.signalToNoise || []).map(function(item) {
+        return { ids: [item.id], labels: [item.label], extra: { signal: item.signalRatio } };
+      });
+    case 'contradictions':
+      return (analysis.contradictions || []).map(function(c) {
+        return { ids: [c.nodeA.id, c.nodeB.id], labels: [c.nodeA.label, c.nodeB.label], extra: { snippetA: c.snippetA, snippetB: c.snippetB } };
+      });
+    case 'hook-coverage':
+      return (analysis.hookCoverageMap && analysis.hookCoverageMap.uncovered || []).map(function(item) {
+        return { ids: [item.event], labels: [item.event], extra: { event: item.event } };
+      });
+    case 'decision-path': {
+      var items = [];
+      if (analysis.decisionPathCompleteness) {
+        analysis.decisionPathCompleteness.hooksWithoutDecisionSteering.forEach(function(item) {
+          items.push({ ids: [item.id], labels: [item.label] });
+        });
+        analysis.decisionPathCompleteness.steeringsWithoutHook.forEach(function(item) {
+          items.push({ ids: [item.id], labels: [item.label] });
+        });
+      }
+      return items;
+    }
+    case 'quality-gate': {
+      var qgMissing = [];
+      if (analysis.qualityGate && analysis.qualityGate.maturityLevel < 2) {
+        if (analysis.qualityGate.missing.needsSelfReview) { qgMissing.push('self-review hook (preToolUse/postToolUse)'); }
+        if (analysis.qualityGate.missing.needsQualitySteering) { qgMissing.push('quality gate steering'); }
+        if (analysis.qualityGate.missing.needsPostTaskReview) { qgMissing.push('post-task review hook'); }
+        return [{ ids: [], labels: [], extra: { missing: qgMissing.join(', ') } }];
+      }
+      return [];
+    }
+    case 'dml-protection': {
+      var dmlMissing = [];
+      if (analysis.dmlProtection && analysis.dmlProtection.maturityLevel < 2) {
+        if (analysis.dmlProtection.missing.needsDmlHook) { dmlMissing.push('preToolUse hook with DML keywords'); }
+        if (analysis.dmlProtection.missing.needsDmlSteering) { dmlMissing.push('DML protection steering'); }
+        if (analysis.dmlProtection.missing.needsRiskIntegration) { dmlMissing.push('hook→risk-steering integration'); }
+        return [{ ids: [], labels: [], extra: { missing: dmlMissing.join(', ') } }];
+      }
+      return [];
+    }
+    default:
+      return [];
+    }
+  }
 
   /**
    * Render the analysis results into the panel.
@@ -1197,13 +1384,13 @@ var CognitivePanel = (function () {
     var html = '';
 
     // Orphan Steerings
-    html += '<div style="margin-bottom:6px;"><span style="color:#FF9800;font-weight:bold;">Orphan Steerings</span>';
+    html += '<div style="margin-bottom:6px;"><span data-fix-header="orphan-steerings" style="color:#FF9800;font-weight:bold;">Orphan Steerings</span>';
     if (analysis.steeringsSoltos.length === 0) {
       html += ' <span style="color:#4CAF50;">0</span>';
     } else {
       html += ' <span style="color:#FF9800;">' + analysis.steeringsSoltos.length + '</span>';
-      analysis.steeringsSoltos.slice(0, 5).forEach(function(item) {
-        html += '<div style="padding-left:6px;"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + '</a></div>';
+      analysis.steeringsSoltos.slice(0, 5).forEach(function(item, idx) {
+        html += '<div style="padding-left:6px;" data-fix-item="orphan-steerings" data-fix-idx="' + idx + '"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + '</a></div>';
       });
       if (analysis.steeringsSoltos.length > 5) {
         html += '<div style="padding-left:6px;color:#666;font-size:9px;">...and ' + (analysis.steeringsSoltos.length - 5) + ' more</div>';
@@ -1212,13 +1399,13 @@ var CognitivePanel = (function () {
     html += '</div>';
 
     // Fragile Links
-    html += '<div style="margin-bottom:6px;"><span style="color:#F44336;font-weight:bold;">Fragile Links</span>';
+    html += '<div style="margin-bottom:6px;"><span data-fix-header="fragile-links" style="color:#F44336;font-weight:bold;">Fragile Links</span>';
     if (analysis.vinculosFrageis.length === 0) {
       html += ' <span style="color:#4CAF50;">0</span>';
     } else {
       html += ' <span style="color:#F44336;">' + analysis.vinculosFrageis.length + '</span>';
-      analysis.vinculosFrageis.slice(0, 5).forEach(function(item) {
-        html += '<div style="padding-left:6px;color:#888;font-size:9px;">' + escapeHtml(item.sourceLabel) + ' \u2192 ' + escapeHtml(item.targetLabel) + '</div>';
+      analysis.vinculosFrageis.slice(0, 5).forEach(function(item, idx) {
+        html += '<div style="padding-left:6px;color:#888;font-size:9px;" data-fix-item="fragile-links" data-fix-idx="' + idx + '">' + escapeHtml(item.sourceLabel) + ' \u2192 ' + escapeHtml(item.targetLabel) + '</div>';
       });
       if (analysis.vinculosFrageis.length > 5) {
         html += '<div style="padding-left:6px;color:#666;font-size:9px;">...and ' + (analysis.vinculosFrageis.length - 5) + ' more</div>';
@@ -1227,13 +1414,13 @@ var CognitivePanel = (function () {
     html += '</div>';
 
     // Isolated Files
-    html += '<div style="margin-bottom:6px;"><span style="color:#9C27B0;font-weight:bold;">Isolated Files</span>';
+    html += '<div style="margin-bottom:6px;"><span data-fix-header="isolated-files" style="color:#9C27B0;font-weight:bold;">Isolated Files</span>';
     if (analysis.arquivosSemContexto.length === 0) {
       html += ' <span style="color:#4CAF50;">0</span>';
     } else {
       html += ' <span style="color:#9C27B0;">' + analysis.arquivosSemContexto.length + '</span>';
-      analysis.arquivosSemContexto.slice(0, 5).forEach(function(item) {
-        html += '<div style="padding-left:6px;"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + '</a></div>';
+      analysis.arquivosSemContexto.slice(0, 5).forEach(function(item, idx) {
+        html += '<div style="padding-left:6px;" data-fix-item="isolated-files" data-fix-idx="' + idx + '"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + '</a></div>';
       });
       if (analysis.arquivosSemContexto.length > 5) {
         html += '<div style="padding-left:6px;color:#666;font-size:9px;">...and ' + (analysis.arquivosSemContexto.length - 5) + ' more</div>';
@@ -1242,13 +1429,13 @@ var CognitivePanel = (function () {
     html += '</div>';
 
     // Coverage Gaps
-    html += '<div style="margin-bottom:6px;"><span style="color:#00BCD4;font-weight:bold;">Coverage Gaps</span>';
+    html += '<div style="margin-bottom:6px;"><span data-fix-header="coverage-gaps" style="color:#00BCD4;font-weight:bold;">Coverage Gaps</span>';
     if (analysis.coverageGaps.length === 0) {
       html += ' <span style="color:#4CAF50;">0</span>';
     } else {
       html += ' <span style="color:#00BCD4;">' + analysis.coverageGaps.length + '</span>';
-      analysis.coverageGaps.slice(0, 5).forEach(function(item) {
-        html += '<div style="padding-left:6px;color:#888;font-size:9px;">' + escapeHtml(item.folder) + '</div>';
+      analysis.coverageGaps.slice(0, 5).forEach(function(item, idx) {
+        html += '<div style="padding-left:6px;color:#888;font-size:9px;" data-fix-item="coverage-gaps" data-fix-idx="' + idx + '">' + escapeHtml(item.folder) + '</div>';
       });
       if (analysis.coverageGaps.length > 5) {
         html += '<div style="padding-left:6px;color:#666;font-size:9px;">...and ' + (analysis.coverageGaps.length - 5) + ' more</div>';
@@ -1257,13 +1444,13 @@ var CognitivePanel = (function () {
     html += '</div>';
 
     // Weak Instructions
-    html += '<div style="margin-bottom:6px;"><span style="color:#FFC107;font-weight:bold;">Weak Instructions</span>';
+    html += '<div style="margin-bottom:6px;"><span data-fix-header="weak-instructions" style="color:#FFC107;font-weight:bold;">Weak Instructions</span>';
     if (analysis.weakInstructions.length === 0) {
       html += ' <span style="color:#4CAF50;">0</span>';
     } else {
       html += ' <span style="color:#FFC107;">' + analysis.weakInstructions.length + '</span>';
-      analysis.weakInstructions.slice(0, 5).forEach(function(item) {
-        html += '<div style="padding-left:6px;"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + ' (' + item.lineCount + ' lines)</a></div>';
+      analysis.weakInstructions.slice(0, 5).forEach(function(item, idx) {
+        html += '<div style="padding-left:6px;" data-fix-item="weak-instructions" data-fix-idx="' + idx + '"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + ' (' + item.lineCount + ' lines)</a></div>';
       });
       if (analysis.weakInstructions.length > 5) {
         html += '<div style="padding-left:6px;color:#666;font-size:9px;">...and ' + (analysis.weakInstructions.length - 5) + ' more</div>';
@@ -1272,13 +1459,13 @@ var CognitivePanel = (function () {
     html += '</div>';
 
     // Context Overload
-    html += '<div style="margin-bottom:6px;"><span style="color:#E91E63;font-weight:bold;">Context Overload</span>';
+    html += '<div style="margin-bottom:6px;"><span data-fix-header="context-overload" style="color:#E91E63;font-weight:bold;">Context Overload</span>';
     if (analysis.contextOverload.length === 0 && analysis.totalAlwaysLines <= 500) {
       html += ' <span style="color:#4CAF50;">OK</span>';
     } else {
       html += ' <span style="color:#E91E63;">' + analysis.totalAlwaysLines + ' lines</span>';
-      analysis.contextOverload.slice(0, 5).forEach(function(item) {
-        html += '<div style="padding-left:6px;"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + ' (' + item.lineCount + ' lines, max 350)</a></div>';
+      analysis.contextOverload.slice(0, 5).forEach(function(item, idx) {
+        html += '<div style="padding-left:6px;" data-fix-item="context-overload" data-fix-idx="' + idx + '"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + ' (' + item.lineCount + ' lines, max 350)</a></div>';
       });
       if (analysis.contextOverload.length > 5) {
         html += '<div style="padding-left:6px;color:#666;font-size:9px;">...and ' + (analysis.contextOverload.length - 5) + ' more</div>';
@@ -1288,21 +1475,21 @@ var CognitivePanel = (function () {
 
     // Instruction-Access Gap
     var gapCount = analysis.hooksWithoutInstruction.length + analysis.steeringsWithoutAccess.length;
-    html += '<div style="margin-bottom:6px;"><span style="color:#8BC34A;font-weight:bold;">Instruction \u2194 Access</span>';
+    html += '<div style="margin-bottom:6px;"><span data-fix-header="hooks-without-instruction" style="color:#8BC34A;font-weight:bold;">Instruction \u2194 Access</span>';
     if (gapCount === 0) {
       html += ' <span style="color:#4CAF50;">OK</span>';
     } else {
       html += ' <span style="color:#8BC34A;">' + gapCount + '</span>';
       if (analysis.hooksWithoutInstruction.length > 0) {
         html += '<div style="padding-left:6px;color:#888;font-size:9px;font-style:italic;">Hooks without instruction:</div>';
-        analysis.hooksWithoutInstruction.slice(0, 3).forEach(function(item) {
-          html += '<div style="padding-left:10px;"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + '</a></div>';
+        analysis.hooksWithoutInstruction.slice(0, 3).forEach(function(item, idx) {
+          html += '<div style="padding-left:10px;" data-fix-item="hooks-without-instruction" data-fix-idx="' + idx + '"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + '</a></div>';
         });
       }
       if (analysis.steeringsWithoutAccess.length > 0) {
         html += '<div style="padding-left:6px;color:#888;font-size:9px;font-style:italic;">Steerings without access:</div>';
-        analysis.steeringsWithoutAccess.slice(0, 3).forEach(function(item) {
-          html += '<div style="padding-left:10px;"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + '</a></div>';
+        analysis.steeringsWithoutAccess.slice(0, 3).forEach(function(item, idx) {
+          html += '<div style="padding-left:10px;" data-fix-item="steerings-without-access" data-fix-idx="' + idx + '"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + '</a></div>';
         });
       }
     }
@@ -1311,93 +1498,93 @@ var CognitivePanel = (function () {
     // ─── New Cognitive Assertiveness Sections ───
 
     // Dead Loops
-    html += '<div style="margin-bottom:6px;"><span style="color:#FF5722;font-weight:bold;">Dead Loops</span>';
+    html += '<div style="margin-bottom:6px;"><span data-fix-header="dead-loops" style="color:#FF5722;font-weight:bold;">Dead Loops</span>';
     if (!analysis.deadLoops || analysis.deadLoops.length === 0) {
       html += ' <span style="color:#4CAF50;">0</span>';
     } else {
       html += ' <span style="color:#FF5722;">' + analysis.deadLoops.length + '</span>';
-      analysis.deadLoops.slice(0, 3).forEach(function(loop) {
-        html += '<div style="padding-left:6px;color:#888;font-size:9px;">' + loop.size + ' nodes: ' + loop.nodes.map(function(n) { return escapeHtml(n.label); }).join(' \u2192 ') + '</div>';
+      analysis.deadLoops.slice(0, 3).forEach(function(loop, idx) {
+        html += '<div style="padding-left:6px;color:#888;font-size:9px;" data-fix-item="dead-loops" data-fix-idx="' + idx + '">' + loop.size + ' nodes: ' + loop.nodes.map(function(n) { return escapeHtml(n.label); }).join(' \u2192 ') + '</div>';
       });
     }
     html += '</div>';
 
     // Hops to Reach
-    html += '<div style="margin-bottom:6px;"><span style="color:#FF7043;font-weight:bold;">Hops to Reach</span>';
+    html += '<div style="margin-bottom:6px;"><span data-fix-header="hops-to-reach" style="color:#FF7043;font-weight:bold;">Hops to Reach</span>';
     if (!analysis.hopsToReach || analysis.hopsToReach.length === 0) {
       html += ' <span style="color:#4CAF50;">OK</span>';
     } else {
       html += ' <span style="color:#FF7043;">' + analysis.hopsToReach.length + '</span>';
-      analysis.hopsToReach.slice(0, 5).forEach(function(item) {
+      analysis.hopsToReach.slice(0, 5).forEach(function(item, idx) {
         var hopsText = (item.hops >= 999 || item.hops === null || item.hops === undefined) ? '\u221E' : item.hops;
-        html += '<div style="padding-left:6px;"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + ' (' + hopsText + ' hops)</a></div>';
+        html += '<div style="padding-left:6px;" data-fix-item="hops-to-reach" data-fix-idx="' + idx + '"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + ' (' + hopsText + ' hops)</a></div>';
       });
     }
     html += '</div>';
 
     // Duplicate Intent
-    html += '<div style="margin-bottom:6px;"><span style="color:#AB47BC;font-weight:bold;">Duplicate Intent</span>';
+    html += '<div style="margin-bottom:6px;"><span data-fix-header="duplicate-intent" style="color:#AB47BC;font-weight:bold;">Duplicate Intent</span>';
     if (!analysis.duplicateIntent || analysis.duplicateIntent.length === 0) {
       html += ' <span style="color:#4CAF50;">0</span>';
     } else {
       html += ' <span style="color:#AB47BC;">' + analysis.duplicateIntent.length + '</span>';
-      analysis.duplicateIntent.slice(0, 3).forEach(function(pair) {
-        html += '<div style="padding-left:6px;color:#888;font-size:9px;">' + escapeHtml(pair.nodeA.label) + ' \u2194 ' + escapeHtml(pair.nodeB.label) + ' (' + pair.overlap + '%)</div>';
+      analysis.duplicateIntent.slice(0, 3).forEach(function(pair, idx) {
+        html += '<div style="padding-left:6px;color:#888;font-size:9px;" data-fix-item="duplicate-intent" data-fix-idx="' + idx + '">' + escapeHtml(pair.nodeA.label) + ' \u2194 ' + escapeHtml(pair.nodeB.label) + ' (' + pair.overlap + '%)</div>';
       });
     }
     html += '</div>';
 
     // Passive Knowledge
-    html += '<div style="margin-bottom:6px;"><span style="color:#78909C;font-weight:bold;">Passive Knowledge</span>';
+    html += '<div style="margin-bottom:6px;"><span data-fix-header="passive-knowledge" style="color:#78909C;font-weight:bold;">Passive Knowledge</span>';
     if (!analysis.passiveKnowledge || analysis.passiveKnowledge.length === 0) {
       html += ' <span style="color:#4CAF50;">0</span>';
     } else {
       html += ' <span style="color:#78909C;">' + analysis.passiveKnowledge.length + '</span>';
-      analysis.passiveKnowledge.slice(0, 5).forEach(function(item) {
-        html += '<div style="padding-left:6px;"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + ' (' + item.actionablePercent + '% actionable)</a></div>';
+      analysis.passiveKnowledge.slice(0, 5).forEach(function(item, idx) {
+        html += '<div style="padding-left:6px;" data-fix-item="passive-knowledge" data-fix-idx="' + idx + '"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + ' (' + item.actionablePercent + '% actionable)</a></div>';
       });
     }
     html += '</div>';
 
     // Signal-to-Noise
-    html += '<div style="margin-bottom:6px;"><span style="color:#FFAB40;font-weight:bold;">Signal-to-Noise</span>';
+    html += '<div style="margin-bottom:6px;"><span data-fix-header="signal-to-noise" style="color:#FFAB40;font-weight:bold;">Signal-to-Noise</span>';
     if (!analysis.signalToNoise || analysis.signalToNoise.length === 0) {
       html += ' <span style="color:#4CAF50;">OK</span>';
     } else {
       html += ' <span style="color:#FFAB40;">' + analysis.signalToNoise.length + '</span>';
-      analysis.signalToNoise.slice(0, 5).forEach(function(item) {
-        html += '<div style="padding-left:6px;"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + ' (' + item.signalRatio + '% signal)</a></div>';
+      analysis.signalToNoise.slice(0, 5).forEach(function(item, idx) {
+        html += '<div style="padding-left:6px;" data-fix-item="signal-to-noise" data-fix-idx="' + idx + '"><a href="#" class="cognitive-node-link" data-node-id="' + escapeAttr(item.id) + '" style="color:#ccc;text-decoration:underline;cursor:pointer;font-size:9px;">' + escapeHtml(item.label) + ' (' + item.signalRatio + '% signal)</a></div>';
       });
     }
     html += '</div>';
 
     // Contradictions
-    html += '<div style="margin-bottom:6px;"><span style="color:#D32F2F;font-weight:bold;">Contradictions</span>';
+    html += '<div style="margin-bottom:6px;"><span data-fix-header="contradictions" style="color:#D32F2F;font-weight:bold;">Contradictions</span>';
     if (!analysis.contradictions || analysis.contradictions.length === 0) {
       html += ' <span style="color:#4CAF50;">0</span>';
     } else {
       html += ' <span style="color:#D32F2F;">' + analysis.contradictions.length + '</span>';
-      analysis.contradictions.slice(0, 3).forEach(function(c) {
-        html += '<div style="padding-left:6px;color:#888;font-size:9px;">' + escapeHtml(c.nodeA.label) + ' vs ' + escapeHtml(c.nodeB.label) + ' (' + escapeHtml(c.conflictType) + ')</div>';
+      analysis.contradictions.slice(0, 3).forEach(function(c, idx) {
+        html += '<div style="padding-left:6px;color:#888;font-size:9px;" data-fix-item="contradictions" data-fix-idx="' + idx + '">' + escapeHtml(c.nodeA.label) + ' vs ' + escapeHtml(c.nodeB.label) + ' (' + escapeHtml(c.conflictType) + ')</div>';
       });
     }
     html += '</div>';
 
     // Hook Coverage
-    html += '<div style="margin-bottom:6px;"><span style="color:#26A69A;font-weight:bold;">Hook Coverage</span>';
+    html += '<div style="margin-bottom:6px;"><span data-fix-header="hook-coverage" style="color:#26A69A;font-weight:bold;">Hook Coverage</span>';
     if (analysis.hookCoverageMap && analysis.hookCoverageMap.uncovered.length === 0) {
       html += ' <span style="color:#4CAF50;">10/10</span>';
     } else if (analysis.hookCoverageMap) {
       var coveredCount = analysis.hookCoverageMap.covered.length;
       html += ' <span style="color:#26A69A;">' + coveredCount + '/10</span>';
-      analysis.hookCoverageMap.uncovered.slice(0, 5).forEach(function(item) {
-        html += '<div style="padding-left:6px;color:#888;font-size:9px;">\u2717 ' + escapeHtml(item.event) + '</div>';
+      analysis.hookCoverageMap.uncovered.slice(0, 5).forEach(function(item, idx) {
+        html += '<div style="padding-left:6px;color:#888;font-size:9px;" data-fix-item="hook-coverage" data-fix-idx="' + idx + '">\u2717 ' + escapeHtml(item.event) + '</div>';
       });
     }
     html += '</div>';
 
     // Decision Path
-    html += '<div style="margin-bottom:6px;"><span style="color:#5C6BC0;font-weight:bold;">Decision Path</span>';
+    html += '<div style="margin-bottom:6px;"><span data-fix-header="decision-path" style="color:#5C6BC0;font-weight:bold;">Decision Path</span>';
     if (analysis.decisionPathCompleteness) {
       var dpGaps = analysis.decisionPathCompleteness.hooksWithoutDecisionSteering.length + analysis.decisionPathCompleteness.steeringsWithoutHook.length;
       if (dpGaps === 0) {
@@ -1406,14 +1593,15 @@ var CognitivePanel = (function () {
         html += ' <span style="color:#5C6BC0;">' + dpGaps + ' gaps</span>';
         if (analysis.decisionPathCompleteness.hooksWithoutDecisionSteering.length > 0) {
           html += '<div style="padding-left:6px;color:#888;font-size:9px;font-style:italic;">Hooks without steering:</div>';
-          analysis.decisionPathCompleteness.hooksWithoutDecisionSteering.slice(0, 3).forEach(function(item) {
-            html += '<div style="padding-left:10px;color:#888;font-size:9px;">' + escapeHtml(item.label) + '</div>';
+          analysis.decisionPathCompleteness.hooksWithoutDecisionSteering.slice(0, 3).forEach(function(item, idx) {
+            html += '<div style="padding-left:10px;color:#888;font-size:9px;" data-fix-item="decision-path" data-fix-idx="' + idx + '">' + escapeHtml(item.label) + '</div>';
           });
         }
         if (analysis.decisionPathCompleteness.steeringsWithoutHook.length > 0) {
           html += '<div style="padding-left:6px;color:#888;font-size:9px;font-style:italic;">Steerings without hook:</div>';
-          analysis.decisionPathCompleteness.steeringsWithoutHook.slice(0, 3).forEach(function(item) {
-            html += '<div style="padding-left:10px;color:#888;font-size:9px;">' + escapeHtml(item.label) + '</div>';
+          analysis.decisionPathCompleteness.steeringsWithoutHook.slice(0, 3).forEach(function(item, idx) {
+            var dpIdx = analysis.decisionPathCompleteness.hooksWithoutDecisionSteering.length + idx;
+            html += '<div style="padding-left:10px;color:#888;font-size:9px;" data-fix-item="decision-path" data-fix-idx="' + dpIdx + '">' + escapeHtml(item.label) + '</div>';
           });
         }
       }
@@ -1421,7 +1609,7 @@ var CognitivePanel = (function () {
     html += '</div>';
 
     // Quality Gate
-    html += '<div style="margin-bottom:6px;"><span style="color:#7E57C2;font-weight:bold;">Quality Gate</span>';
+    html += '<div style="margin-bottom:6px;"><span data-fix-header="quality-gate" style="color:#7E57C2;font-weight:bold;">Quality Gate</span>';
     if (analysis.qualityGate) {
       var qgLevel = analysis.qualityGate.maturityLevel;
       var qgColor = qgLevel === 2 ? '#4CAF50' : qgLevel === 1 ? '#FFC107' : '#F44336';
@@ -1431,7 +1619,7 @@ var CognitivePanel = (function () {
     html += '</div>';
 
     // DML Protection
-    html += '<div style="margin-bottom:6px;"><span style="color:#EF5350;font-weight:bold;">DML Protection</span>';
+    html += '<div style="margin-bottom:6px;"><span data-fix-header="dml-protection" style="color:#EF5350;font-weight:bold;">DML Protection</span>';
     if (analysis.dmlProtection) {
       var dmlLevel = analysis.dmlProtection.maturityLevel;
       var dmlColor = dmlLevel === 2 ? '#4CAF50' : dmlLevel === 1 ? '#FFC107' : '#F44336';
@@ -1450,6 +1638,126 @@ var CognitivePanel = (function () {
     }
 
     content.innerHTML = html;
+
+    // ─── Inject Fix Buttons via DOM (after innerHTML is set) ───
+
+    // Build issueData mappings for each category
+    var fixDataMap = {
+      'orphan-steerings': analysis.steeringsSoltos.slice(0, 5).map(function(item) {
+        return { ids: [item.id], labels: [item.label] };
+      }),
+      'fragile-links': analysis.vinculosFrageis.slice(0, 5).map(function(item) {
+        return { ids: [item.source, item.target], labels: [item.sourceLabel, item.targetLabel] };
+      }),
+      'isolated-files': analysis.arquivosSemContexto.slice(0, 5).map(function(item) {
+        return { ids: [item.id], labels: [item.label], extra: { type: item.type } };
+      }),
+      'coverage-gaps': analysis.coverageGaps.slice(0, 5).map(function(item) {
+        return { ids: [item.folder], labels: [item.folder] };
+      }),
+      'weak-instructions': analysis.weakInstructions.slice(0, 5).map(function(item) {
+        return { ids: [item.id], labels: [item.label], extra: { lines: item.lineCount } };
+      }),
+      'context-overload': analysis.contextOverload.slice(0, 5).map(function(item) {
+        return { ids: [item.id], labels: [item.label], extra: { lines: item.lineCount } };
+      }),
+      'hooks-without-instruction': analysis.hooksWithoutInstruction.slice(0, 3).map(function(item) {
+        return { ids: [item.id], labels: [item.label] };
+      }),
+      'steerings-without-access': analysis.steeringsWithoutAccess.slice(0, 3).map(function(item) {
+        return { ids: [item.id], labels: [item.label], extra: { inclusion: item.inclusion } };
+      }),
+      'dead-loops': (analysis.deadLoops || []).slice(0, 3).map(function(loop) {
+        return { ids: loop.nodes.map(function(n) { return n.id; }), labels: loop.nodes.map(function(n) { return n.label; }), extra: { nodes: loop.nodes.map(function(n) { return n.label; }).join(', ') } };
+      }),
+      'hops-to-reach': (analysis.hopsToReach || []).slice(0, 5).map(function(item) {
+        return { ids: [item.id], labels: [item.label], extra: { hops: item.hops } };
+      }),
+      'duplicate-intent': (analysis.duplicateIntent || []).slice(0, 3).map(function(pair) {
+        return { ids: [pair.nodeA.id, pair.nodeB.id], labels: [pair.nodeA.label, pair.nodeB.label], extra: { overlap: pair.overlap } };
+      }),
+      'passive-knowledge': (analysis.passiveKnowledge || []).slice(0, 5).map(function(item) {
+        return { ids: [item.id], labels: [item.label], extra: { actionable: item.actionablePercent } };
+      }),
+      'signal-to-noise': (analysis.signalToNoise || []).slice(0, 5).map(function(item) {
+        return { ids: [item.id], labels: [item.label], extra: { signal: item.signalRatio } };
+      }),
+      'contradictions': (analysis.contradictions || []).slice(0, 3).map(function(c) {
+        return { ids: [c.nodeA.id, c.nodeB.id], labels: [c.nodeA.label, c.nodeB.label], extra: { snippetA: c.snippetA, snippetB: c.snippetB } };
+      }),
+      'hook-coverage': (analysis.hookCoverageMap && analysis.hookCoverageMap.uncovered || []).slice(0, 5).map(function(item) {
+        return { ids: [item.event], labels: [item.event], extra: { event: item.event } };
+      }),
+      'decision-path': (function() {
+        var items = [];
+        if (analysis.decisionPathCompleteness) {
+          analysis.decisionPathCompleteness.hooksWithoutDecisionSteering.slice(0, 3).forEach(function(item) {
+            items.push({ ids: [item.id], labels: [item.label] });
+          });
+          analysis.decisionPathCompleteness.steeringsWithoutHook.slice(0, 3).forEach(function(item) {
+            items.push({ ids: [item.id], labels: [item.label] });
+          });
+        }
+        return items;
+      })(),
+    };
+
+    // Quality Gate and DML Protection — single-item categories based on maturity
+    if (analysis.qualityGate && analysis.qualityGate.maturityLevel < 2) {
+      var qgMissingItems = [];
+      if (analysis.qualityGate.missing.needsSelfReview) { qgMissingItems.push('self-review hook (preToolUse/postToolUse)'); }
+      if (analysis.qualityGate.missing.needsQualitySteering) { qgMissingItems.push('quality gate steering'); }
+      if (analysis.qualityGate.missing.needsPostTaskReview) { qgMissingItems.push('post-task review hook'); }
+      fixDataMap['quality-gate'] = [{ ids: [], labels: [], extra: { missing: qgMissingItems.join(', ') } }];
+    } else {
+      fixDataMap['quality-gate'] = [];
+    }
+
+    if (analysis.dmlProtection && analysis.dmlProtection.maturityLevel < 2) {
+      var dmlMissingItems = [];
+      if (analysis.dmlProtection.missing.needsDmlHook) { dmlMissingItems.push('preToolUse hook with DML keywords'); }
+      if (analysis.dmlProtection.missing.needsDmlSteering) { dmlMissingItems.push('DML protection steering'); }
+      if (analysis.dmlProtection.missing.needsRiskIntegration) { dmlMissingItems.push('hook→risk-steering integration'); }
+      fixDataMap['dml-protection'] = [{ ids: [], labels: [], extra: { missing: dmlMissingItems.join(', ') } }];
+    } else {
+      fixDataMap['dml-protection'] = [];
+    }
+
+    // Inject individual Fix buttons into each issue item
+    Object.keys(fixDataMap).forEach(function(category) {
+      var items = fixDataMap[category];
+      var itemEls = content.querySelectorAll('[data-fix-item="' + category + '"]');
+      itemEls.forEach(function(el) {
+        var idx = parseInt(el.getAttribute('data-fix-idx'), 10);
+        if (items[idx]) {
+          el.appendChild(createFixButton(category, items[idx]));
+        }
+      });
+    });
+
+    // Inject Fix All buttons into category headers with >1 issue
+    Object.keys(fixDataMap).forEach(function(category) {
+      var allItems = fixDataMap[category];
+      if (allItems.length > 1) {
+        var headerEl = content.querySelector('[data-fix-header="' + category + '"]');
+        if (headerEl) {
+          // Build full allIssuesData from the complete analysis arrays (not just sliced)
+          var fullIssuesData = buildFullIssuesData(category, analysis);
+          headerEl.parentNode.insertBefore(createFixAllButton(category, fullIssuesData), headerEl.nextSibling);
+        }
+      }
+    });
+
+    // Also inject Fix button for quality-gate and dml-protection headers (single-item, no Fix All)
+    ['quality-gate', 'dml-protection'].forEach(function(category) {
+      var items = fixDataMap[category];
+      if (items.length === 1) {
+        var headerEl = content.querySelector('[data-fix-header="' + category + '"]');
+        if (headerEl) {
+          headerEl.parentNode.insertBefore(createFixButton(category, items[0]), headerEl.nextSibling);
+        }
+      }
+    });
 
     // Wire click-to-highlight for node links
     var links = content.querySelectorAll('.cognitive-node-link');

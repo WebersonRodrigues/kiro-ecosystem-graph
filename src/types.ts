@@ -507,6 +507,42 @@ export interface DmlProtectionResult {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Auto-Fix Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Categorias de issues cognitivas — correspondem às 19 regras */
+export type IssueCategory =
+  | 'orphan-steerings'
+  | 'fragile-links'
+  | 'isolated-files'
+  | 'coverage-gaps'
+  | 'weak-instructions'
+  | 'context-overload'
+  | 'large-domain-steerings'
+  | 'hooks-without-instruction'
+  | 'steerings-without-access'
+  | 'dead-loops'
+  | 'hops-to-reach'
+  | 'duplicate-intent'
+  | 'passive-knowledge'
+  | 'signal-to-noise'
+  | 'contradictions'
+  | 'hook-coverage'
+  | 'decision-path'
+  | 'quality-gate'
+  | 'dml-protection';
+
+/** Dados genéricos de uma issue para geração de prompt */
+export interface FixIssueData {
+  /** IDs/paths dos nós afetados */
+  ids: string[];
+  /** Labels dos nós afetados */
+  labels: string[];
+  /** Dados extras dependendo da categoria */
+  extra?: Record<string, string | number | string[]>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Extension <-> Webview Communication
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -533,7 +569,10 @@ export type WebviewMessage =
   | { type: 'loadSnapshot'; filename: string }
   | { type: 'exportImage'; dataUrl: string }
   | { type: 'exportImageError'; error: string }
-  | { type: 'exportCognitiveAnalysis'; data: CognitiveAnalysisResult | null };
+  | { type: 'exportCognitiveAnalysis'; data: CognitiveAnalysisResult | null }
+  // ─── Auto-Fix messages ───
+  | { type: 'fixIssue'; category: IssueCategory; issue: FixIssueData }
+  | { type: 'fixAllCategory'; category: IssueCategory; issues: FixIssueData[] };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Stats History (Temporal Evolution)

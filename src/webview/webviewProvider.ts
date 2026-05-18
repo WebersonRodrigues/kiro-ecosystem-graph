@@ -1,10 +1,11 @@
 import * as vscode from 'vscode';
-import { SerializedGraph, ExtensionMessage, WebviewMessage, DailySnapshot, AnnotationEntry, CognitiveAnalysisResult } from '../types';
+import { SerializedGraph, ExtensionMessage, WebviewMessage, DailySnapshot, AnnotationEntry, CognitiveAnalysisResult, IssueCategory, FixIssueData } from '../types';
 import { GraphDataStore } from '../services/graphDataStore';
 import { PathResolver } from '../services/pathResolver';
 import { AnnotationService } from '../services/annotationService';
 import { SnapshotService } from '../services/snapshotService';
 import { generateCognitiveReport } from '../services/markdownReportGenerator';
+import { generateTargetedPrompt, generateConsolidatedPrompt } from '../services/fixPromptGenerator';
 
 /**
  * Webview provider for the Ecosystem Graph panel.
@@ -115,6 +116,12 @@ export class EcosystemGraphProvider implements vscode.WebviewViewProvider {
         break;
       case 'exportCognitiveAnalysis':
         this.handleExportCognitiveAnalysis(message.data);
+        break;
+      case 'fixIssue':
+        this.handleFixIssue(message.category, message.issue);
+        break;
+      case 'fixAllCategory':
+        this.handleFixAllCategory(message.category, message.issues);
         break;
     }
   }
@@ -234,6 +241,36 @@ export class EcosystemGraphProvider implements vscode.WebviewViewProvider {
       vscode.window.showInformationMessage(`Cognitive analysis exported to ${savedFilename}`);
     } catch {
       vscode.window.showWarningMessage('Failed to export cognitive analysis');
+    }
+  }
+
+  /**
+   * Handles a single fix issue request: generates a targeted prompt and copies to clipboard.
+   */
+  private async handleFixIssue(category: IssueCategory, issue: FixIssueData): Promise<void> {
+    const prompt = generateTargetedPrompt(category, issue);
+    await this.copyAndSendToChat(prompt);
+  }
+
+  /**
+   * Handles a fix-all request for a category: generates a consolidated prompt and copies to clipboard.
+   */
+  private async handleFixAllCategory(category: IssueCategory, issues: FixIssueData[]): Promise<void> {
+    const prompt = generateConsolidatedPrompt(category, issues);
+    if (!prompt) { return; }
+    await this.copyAndSendToChat(prompt);
+  }
+
+  /**
+   * Copies the prompt to clipboard, shows a notification, and attempts to open the chat panel.
+   */
+  private async copyAndSendToChat(prompt: string): Promise<void> {
+    await vscode.env.clipboard.writeText(prompt);
+    vscode.window.showInformationMessage('Prompt copiado para o clipboard. Cole no chat do Kiro.');
+    try {
+      await vscode.commands.executeCommand('workbench.action.chat.open');
+    } catch {
+      // Chat command unavailable — user pastes manually
     }
   }
 
