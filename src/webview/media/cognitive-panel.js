@@ -606,16 +606,26 @@ var CognitivePanel = (function () {
 
   // ─── Semantic Coherence (Rule 21) ──────────────────────────────────────
 
+  /** Universal cross-cutting keywords valid for ANY steering type */
+  var UNIVERSAL_KEYWORDS = [
+    // EN
+    'troubleshooting', 'setup', 'configuration', 'examples', 'references',
+    'overview', 'summary', 'getting', 'started', 'prerequisites', 'faq', 'tips',
+    // PT-BR
+    'armadilhas', 'configuração', 'exemplos', 'referências', 'visão', 'geral',
+    'pré', 'requisitos', 'dicas', 'atalhos', 'erros', 'comuns', 'diagnóstico'
+  ];
+
   var SEMANTIC_KEYWORD_SETS = {
-    'steering-policy': ['security', 'auth', 'permission', 'access', 'compliance', 'governance', 'guard', 'policy', 'rule', 'restrict', 'allow', 'deny', 'segurança', 'permissão', 'acesso', 'política', 'regra'],
-    'steering-tech': ['deploy', 'pipeline', 'infrastructure', 'architecture', 'stack', 'database', 'migration', 'ci', 'cd', 'docker', 'kubernetes', 'api', 'endpoint', 'server', 'tecnologia', 'arquitetura', 'infraestrutura'],
-    'steering-flow': ['flow', 'step', 'sequence', 'process', 'workflow', 'trigger', 'action', 'state', 'transition', 'fluxo', 'etapa', 'processo', 'sequência'],
-    'steering-domain': ['domain', 'entity', 'model', 'business', 'rule', 'logic', 'convention', 'pattern', 'domínio', 'entidade', 'modelo', 'negócio', 'regra', 'convenção', 'padrão'],
-    'steering-product': ['product', 'feature', 'user', 'story', 'requirement', 'backlog', 'sprint', 'roadmap', 'produto', 'funcionalidade', 'usuário', 'requisito'],
-    'steering-agent': ['agent', 'persona', 'prompt', 'llm', 'ai', 'behavior', 'instruction', 'context', 'agente', 'comportamento', 'instrução', 'contexto'],
-    'steering-help': ['help', 'faq', 'question', 'answer', 'guide', 'tutorial', 'howto', 'ajuda', 'pergunta', 'resposta', 'guia'],
-    'steering-playbook': ['playbook', 'runbook', 'incident', 'procedure', 'checklist', 'step', 'recovery', 'procedimento', 'incidente', 'recuperação'],
-    'steering-observability': ['observability', 'monitoring', 'logging', 'tracing', 'alert', 'metric', 'dashboard', 'sla', 'observabilidade', 'monitoramento', 'alerta', 'métrica'],
+    'steering-policy': ['security', 'auth', 'permission', 'access', 'compliance', 'governance', 'guard', 'policy', 'rule', 'restrict', 'allow', 'deny', 'segurança', 'permissão', 'acesso', 'política', 'regra', 'autorização', 'proteção', 'controle'],
+    'steering-tech': ['deploy', 'pipeline', 'infrastructure', 'architecture', 'stack', 'database', 'migration', 'ci', 'cd', 'docker', 'kubernetes', 'api', 'endpoint', 'server', 'tecnologia', 'arquitetura', 'infraestrutura', 'ambientes', 'acesso', 'tunnel', 'cluster', 'environment', 'ssh', 'network', 'servidor', 'banco', 'rota', 'camada'],
+    'steering-flow': ['flow', 'step', 'sequence', 'process', 'workflow', 'trigger', 'action', 'state', 'transition', 'fluxo', 'etapa', 'processo', 'sequência', 'automação', 'gatilho', 'ação', 'estado'],
+    'steering-domain': ['domain', 'entity', 'model', 'business', 'rule', 'logic', 'convention', 'pattern', 'domínio', 'entidade', 'modelo', 'negócio', 'regra', 'convenção', 'padrão', 'stack', 'estrutura', 'endpoints', 'troubleshooting', 'armadilhas', 'configuração', 'banco', 'webhooks', 'camadas', 'fluxo'],
+    'steering-product': ['product', 'feature', 'user', 'story', 'requirement', 'backlog', 'sprint', 'roadmap', 'produto', 'funcionalidade', 'usuário', 'requisito', 'entrega', 'prioridade', 'escopo'],
+    'steering-agent': ['agent', 'persona', 'prompt', 'llm', 'ai', 'behavior', 'instruction', 'context', 'agente', 'comportamento', 'instrução', 'contexto', 'modelo', 'resposta', 'diretriz'],
+    'steering-help': ['help', 'faq', 'question', 'answer', 'guide', 'tutorial', 'howto', 'ajuda', 'pergunta', 'resposta', 'guia', 'documentação', 'suporte'],
+    'steering-playbook': ['playbook', 'runbook', 'incident', 'procedure', 'checklist', 'step', 'recovery', 'procedimento', 'incidente', 'recuperação', 'emergência', 'escalonamento', 'mitigação'],
+    'steering-observability': ['observability', 'monitoring', 'logging', 'tracing', 'alert', 'metric', 'dashboard', 'sla', 'observabilidade', 'monitoramento', 'alerta', 'métrica', 'rastreamento', 'log', 'painel'],
   };
 
   /**
@@ -635,6 +645,8 @@ var CognitivePanel = (function () {
       var offTopicHeaders = [];
       headers.forEach(function(header) {
         var tokens = header.toLowerCase().split(/[^a-záàâãéèêíïóôõöúçñü]+/).filter(function(t) { return t.length > 0; });
+        var isUniversal = tokens.some(function(token) { return UNIVERSAL_KEYWORDS.indexOf(token) !== -1; });
+        if (isUniversal) { return; }
         var isOnTopic = tokens.some(function(token) { return keywordSet.indexOf(token) !== -1; });
         if (!isOnTopic) { offTopicHeaders.push(header); }
       });

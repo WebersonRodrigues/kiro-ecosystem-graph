@@ -10,6 +10,7 @@ import {
   isHeaderOnTopic,
   tokenizeHeader,
   KEYWORD_SETS,
+  UNIVERSAL_KEYWORDS,
   hasSpecificityMarker,
   isVagueInstruction,
   computeSpecificityScore,
@@ -664,13 +665,13 @@ describe('CognitiveValidations — computeSemanticCoherence()', function () {
     const nodes: GraphNode[] = [
       makeNode('security-policies.md', {
         type: 'steering-policy',
-        metadata: { sectionHeaders: ['Deploy Pipeline', 'Database Migrations', 'Docker Setup'] },
+        metadata: { sectionHeaders: ['Deploy Pipeline', 'Database Migrations', 'Docker Compose'] },
       }),
     ];
     const result = computeSemanticCoherence(nodes);
     assert.strictEqual(result.length, 1);
     assert.strictEqual(result[0].coherencePercent, 0);
-    assert.deepStrictEqual(result[0].offTopicHeaders, ['Deploy Pipeline', 'Database Migrations', 'Docker Setup']);
+    assert.deepStrictEqual(result[0].offTopicHeaders, ['Deploy Pipeline', 'Database Migrations', 'Docker Compose']);
   });
 
   it('steering with mix of headers (2/5 on-topic = 0.40) produces alert', function () {
@@ -682,8 +683,8 @@ describe('CognitiveValidations — computeSemanticCoherence()', function () {
             'Security Overview',   // on-topic (security)
             'Deploy Pipeline',     // off-topic
             'Access Rules',        // on-topic (access)
-            'Database Setup',      // off-topic
-            'Docker Config',       // off-topic
+            'Database Migrations', // off-topic
+            'Docker Compose',      // off-topic
           ],
         },
       }),
@@ -2339,5 +2340,209 @@ describe('CognitiveValidations — computeDmlProtectionLevel with hasInlineRisk'
 
   it('backward compatible: omitted hasInlineRisk preserves level 0', function () {
     assert.strictEqual(computeDmlProtectionLevel(false, false, false), 0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Universal Keywords — Semantic Coherence False Positives Fix (Spec 25)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('CognitiveValidations — UNIVERSAL_KEYWORDS bypass (EN)', function () {
+  const enKeywords = [
+    'troubleshooting', 'setup', 'configuration', 'examples', 'references',
+    'overview', 'summary', 'getting', 'started', 'prerequisites', 'faq', 'tips',
+  ];
+
+  const arbitraryKeywordSet = ['security', 'auth', 'permission'];
+
+  enKeywords.forEach(function (keyword) {
+    it(`"${keyword}" returns true from isHeaderOnTopic regardless of keyword set`, function () {
+      assert.strictEqual(isHeaderOnTopic(keyword, arbitraryKeywordSet), true);
+    });
+  });
+
+  it('EN universal keyword in mixed-case header returns true', function () {
+    assert.strictEqual(isHeaderOnTopic('Troubleshooting Guide', arbitraryKeywordSet), true);
+  });
+
+  it('EN universal keyword in compound header returns true', function () {
+    assert.strictEqual(isHeaderOnTopic('Getting Started with the Project', arbitraryKeywordSet), true);
+  });
+});
+
+describe('CognitiveValidations — UNIVERSAL_KEYWORDS bypass (PT-BR)', function () {
+  const ptbrKeywords = [
+    'armadilhas', 'configuração', 'exemplos', 'referências', 'visão', 'geral',
+    'pré', 'requisitos', 'dicas', 'atalhos', 'erros', 'comuns', 'diagnóstico',
+  ];
+
+  const arbitraryKeywordSet = ['deploy', 'pipeline', 'docker'];
+
+  ptbrKeywords.forEach(function (keyword) {
+    it(`"${keyword}" returns true from isHeaderOnTopic regardless of keyword set`, function () {
+      assert.strictEqual(isHeaderOnTopic(keyword, arbitraryKeywordSet), true);
+    });
+  });
+
+  it('PT-BR universal keyword in compound header returns true', function () {
+    assert.strictEqual(isHeaderOnTopic('Visão Geral do Sistema', arbitraryKeywordSet), true);
+  });
+
+  it('PT-BR universal keyword "Pré-requisitos" returns true', function () {
+    assert.strictEqual(isHeaderOnTopic('Pré-requisitos', arbitraryKeywordSet), true);
+  });
+
+  it('PT-BR universal keyword "Erros Comuns" returns true', function () {
+    assert.strictEqual(isHeaderOnTopic('Erros Comuns', arbitraryKeywordSet), true);
+  });
+});
+
+describe('CognitiveValidations — expanded steering-tech terms', function () {
+  const techKeywords = KEYWORD_SETS['steering-tech']!;
+
+  it('"Ambientes" is recognized as on-topic for steering-tech', function () {
+    assert.strictEqual(isHeaderOnTopic('Ambientes de Produção', techKeywords), true);
+  });
+
+  it('"Acesso SSH" is recognized as on-topic for steering-tech', function () {
+    assert.strictEqual(isHeaderOnTopic('Acesso SSH', techKeywords), true);
+  });
+
+  it('"Tunnel" is recognized as on-topic for steering-tech', function () {
+    assert.strictEqual(isHeaderOnTopic('Tunnel Configuration', techKeywords), true);
+  });
+
+  it('"Cluster" is recognized as on-topic for steering-tech', function () {
+    assert.strictEqual(isHeaderOnTopic('Cluster Setup', techKeywords), true);
+  });
+
+  it('"Environment" is recognized as on-topic for steering-tech', function () {
+    assert.strictEqual(isHeaderOnTopic('Environment Variables', techKeywords), true);
+  });
+
+  it('"SSH" is recognized as on-topic for steering-tech', function () {
+    assert.strictEqual(isHeaderOnTopic('SSH Keys', techKeywords), true);
+  });
+
+  it('"Network" is recognized as on-topic for steering-tech', function () {
+    assert.strictEqual(isHeaderOnTopic('Network Configuration', techKeywords), true);
+  });
+
+  it('"Servidor" is recognized as on-topic for steering-tech', function () {
+    assert.strictEqual(isHeaderOnTopic('Servidor de Aplicação', techKeywords), true);
+  });
+
+  it('"Banco" is recognized as on-topic for steering-tech', function () {
+    assert.strictEqual(isHeaderOnTopic('Banco de Dados', techKeywords), true);
+  });
+});
+
+describe('CognitiveValidations — expanded steering-domain terms', function () {
+  const domainKeywords = KEYWORD_SETS['steering-domain']!;
+
+  it('"Stack" is recognized as on-topic for steering-domain', function () {
+    assert.strictEqual(isHeaderOnTopic('Stack Tecnológica', domainKeywords), true);
+  });
+
+  it('"Webhooks" is recognized as on-topic for steering-domain', function () {
+    assert.strictEqual(isHeaderOnTopic('Webhooks Integration', domainKeywords), true);
+  });
+
+  it('"Endpoints" is recognized as on-topic for steering-domain', function () {
+    assert.strictEqual(isHeaderOnTopic('Endpoints da API', domainKeywords), true);
+  });
+
+  it('"Estrutura" is recognized as on-topic for steering-domain', function () {
+    assert.strictEqual(isHeaderOnTopic('Estrutura do Projeto', domainKeywords), true);
+  });
+
+  it('"Camadas" is recognized as on-topic for steering-domain', function () {
+    assert.strictEqual(isHeaderOnTopic('Camadas da Aplicação', domainKeywords), true);
+  });
+});
+
+describe('CognitiveValidations — genuinely off-topic headers still return false', function () {
+  it('"Deploy Pipeline" in steering-policy returns false', function () {
+    const policyKeywords = KEYWORD_SETS['steering-policy']!;
+    assert.strictEqual(isHeaderOnTopic('Deploy Pipeline', policyKeywords), false);
+  });
+
+  it('"Database Migrations" in steering-policy returns false', function () {
+    const policyKeywords = KEYWORD_SETS['steering-policy']!;
+    assert.strictEqual(isHeaderOnTopic('Database Migrations', policyKeywords), false);
+  });
+
+  it('"Docker Compose" in steering-agent returns false', function () {
+    const agentKeywords = KEYWORD_SETS['steering-agent']!;
+    assert.strictEqual(isHeaderOnTopic('Docker Compose', agentKeywords), false);
+  });
+
+  it('"Sprint Planning" in steering-tech returns false', function () {
+    const techKeywords = KEYWORD_SETS['steering-tech']!;
+    assert.strictEqual(isHeaderOnTopic('Sprint Planning', techKeywords), false);
+  });
+
+  it('"User Stories" in steering-observability returns false', function () {
+    const obsKeywords = KEYWORD_SETS['steering-observability']!;
+    assert.strictEqual(isHeaderOnTopic('User Stories', obsKeywords), false);
+  });
+});
+
+describe('CognitiveValidations — computeSemanticCoherence with universal headers', function () {
+  it('steering with universal headers mixed with domain headers produces no alert', function () {
+    const nodes: GraphNode[] = [
+      makeNode('tech-guide.md', {
+        type: 'steering-tech',
+        metadata: {
+          sectionHeaders: [
+            'Overview',           // universal
+            'Prerequisites',      // universal
+            'Architecture',       // domain (steering-tech)
+            'Troubleshooting',    // universal
+            'Examples',           // universal
+          ],
+        },
+      }),
+    ];
+    const result = computeSemanticCoherence(nodes);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('steering with only universal headers produces no alert', function () {
+    const nodes: GraphNode[] = [
+      makeNode('domain-guide.md', {
+        type: 'steering-domain',
+        metadata: {
+          sectionHeaders: [
+            'Visão Geral',
+            'Configuração',
+            'Exemplos',
+            'Diagnóstico',
+            'Dicas',
+          ],
+        },
+      }),
+    ];
+    const result = computeSemanticCoherence(nodes);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('steering with genuinely off-topic headers still produces alert', function () {
+    const nodes: GraphNode[] = [
+      makeNode('policy-guide.md', {
+        type: 'steering-policy',
+        metadata: {
+          sectionHeaders: [
+            'Deploy Pipeline',
+            'Database Migrations',
+            'Docker Compose',
+            'Kubernetes Pods',
+          ],
+        },
+      }),
+    ];
+    const result = computeSemanticCoherence(nodes);
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].offTopicHeaders.length, 4);
   });
 });

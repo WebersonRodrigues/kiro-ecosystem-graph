@@ -1156,17 +1156,27 @@ function computeSharedKeywords(keywordsA: string[], keywordsB: string[]): string
 // Semantic Coherence (Rule 21)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Universal cross-cutting keywords valid for ANY steering type */
+export const UNIVERSAL_KEYWORDS: string[] = [
+  // EN
+  'troubleshooting', 'setup', 'configuration', 'examples', 'references',
+  'overview', 'summary', 'getting', 'started', 'prerequisites', 'faq', 'tips',
+  // PT-BR
+  'armadilhas', 'configuração', 'exemplos', 'referências', 'visão', 'geral',
+  'pré', 'requisitos', 'dicas', 'atalhos', 'erros', 'comuns', 'diagnóstico',
+];
+
 /** Keyword sets mapping each steering NodeType to expected domain terms */
 export const KEYWORD_SETS: Partial<Record<NodeType, string[]>> = {
-  'steering-policy': ['security', 'auth', 'permission', 'access', 'compliance', 'governance', 'guard', 'policy', 'rule', 'restrict', 'allow', 'deny', 'segurança', 'permissão', 'acesso', 'política', 'regra'],
-  'steering-tech': ['deploy', 'pipeline', 'infrastructure', 'architecture', 'stack', 'database', 'migration', 'ci', 'cd', 'docker', 'kubernetes', 'api', 'endpoint', 'server', 'tecnologia', 'arquitetura', 'infraestrutura'],
-  'steering-flow': ['flow', 'step', 'sequence', 'process', 'workflow', 'trigger', 'action', 'state', 'transition', 'fluxo', 'etapa', 'processo', 'sequência'],
-  'steering-domain': ['domain', 'entity', 'model', 'business', 'rule', 'logic', 'convention', 'pattern', 'domínio', 'entidade', 'modelo', 'negócio', 'regra', 'convenção', 'padrão'],
-  'steering-product': ['product', 'feature', 'user', 'story', 'requirement', 'backlog', 'sprint', 'roadmap', 'produto', 'funcionalidade', 'usuário', 'requisito'],
-  'steering-agent': ['agent', 'persona', 'prompt', 'llm', 'ai', 'behavior', 'instruction', 'context', 'agente', 'comportamento', 'instrução', 'contexto'],
-  'steering-help': ['help', 'faq', 'question', 'answer', 'guide', 'tutorial', 'howto', 'ajuda', 'pergunta', 'resposta', 'guia'],
-  'steering-playbook': ['playbook', 'runbook', 'incident', 'procedure', 'checklist', 'step', 'recovery', 'procedimento', 'incidente', 'recuperação'],
-  'steering-observability': ['observability', 'monitoring', 'logging', 'tracing', 'alert', 'metric', 'dashboard', 'sla', 'observabilidade', 'monitoramento', 'alerta', 'métrica'],
+  'steering-policy': ['security', 'auth', 'permission', 'access', 'compliance', 'governance', 'guard', 'policy', 'rule', 'restrict', 'allow', 'deny', 'segurança', 'permissão', 'acesso', 'política', 'regra', 'autorização', 'proteção', 'controle'],
+  'steering-tech': ['deploy', 'pipeline', 'infrastructure', 'architecture', 'stack', 'database', 'migration', 'ci', 'cd', 'docker', 'kubernetes', 'api', 'endpoint', 'server', 'tecnologia', 'arquitetura', 'infraestrutura', 'ambientes', 'acesso', 'tunnel', 'cluster', 'environment', 'ssh', 'network', 'servidor', 'banco', 'rota', 'camada'],
+  'steering-flow': ['flow', 'step', 'sequence', 'process', 'workflow', 'trigger', 'action', 'state', 'transition', 'fluxo', 'etapa', 'processo', 'sequência', 'automação', 'gatilho', 'ação', 'estado'],
+  'steering-domain': ['domain', 'entity', 'model', 'business', 'rule', 'logic', 'convention', 'pattern', 'domínio', 'entidade', 'modelo', 'negócio', 'regra', 'convenção', 'padrão', 'stack', 'estrutura', 'endpoints', 'troubleshooting', 'armadilhas', 'configuração', 'banco', 'webhooks', 'camadas', 'fluxo'],
+  'steering-product': ['product', 'feature', 'user', 'story', 'requirement', 'backlog', 'sprint', 'roadmap', 'produto', 'funcionalidade', 'usuário', 'requisito', 'entrega', 'prioridade', 'escopo'],
+  'steering-agent': ['agent', 'persona', 'prompt', 'llm', 'ai', 'behavior', 'instruction', 'context', 'agente', 'comportamento', 'instrução', 'contexto', 'modelo', 'resposta', 'diretriz'],
+  'steering-help': ['help', 'faq', 'question', 'answer', 'guide', 'tutorial', 'howto', 'ajuda', 'pergunta', 'resposta', 'guia', 'documentação', 'suporte'],
+  'steering-playbook': ['playbook', 'runbook', 'incident', 'procedure', 'checklist', 'step', 'recovery', 'procedimento', 'incidente', 'recuperação', 'emergência', 'escalonamento', 'mitigação'],
+  'steering-observability': ['observability', 'monitoring', 'logging', 'tracing', 'alert', 'metric', 'dashboard', 'sla', 'observabilidade', 'monitoramento', 'alerta', 'métrica', 'rastreamento', 'log', 'painel'],
 };
 
 /**
@@ -1225,11 +1235,12 @@ function evaluateNodeCoherence(node: GraphNode): SemanticCoherenceAlert | null {
 }
 
 /**
- * Tokenizes a header and checks if at least one token matches the keyword set.
+ * Tokenizes a header and checks if at least one token matches a universal
+ * keyword or the domain-specific keyword set.
  */
 export function isHeaderOnTopic(header: string, keywordSet: string[]): boolean {
   const tokens = tokenizeHeader(header);
-  return tokens.some((token) => keywordSet.includes(token));
+  return tokens.some((token) => UNIVERSAL_KEYWORDS.includes(token) || keywordSet.includes(token));
 }
 
 /**
