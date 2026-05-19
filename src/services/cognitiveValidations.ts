@@ -1845,7 +1845,7 @@ function isAlwaysLoadedSteering(node: GraphNode): boolean {
   if (!node.type || !node.type.startsWith('steering-')) { return false; }
   const meta = node.metadata;
   if (!meta) { return false; }
-  return meta.alwaysApply === true || meta.autoInclusion === true;
+  return meta.inclusion === 'always' || meta.alwaysApply === true || meta.autoInclusion === true;
 }
 
 /**

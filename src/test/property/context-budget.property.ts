@@ -42,7 +42,7 @@ const nonAlwaysSteeringArb = fc.record({
   type: fc.constantFrom(...steeringTypes),
 }).map(({ id, type }) => makeNode(id, {
   type,
-  metadata: { inclusion: 'always' },
+  metadata: { inclusion: 'auto' },
 }));
 
 const hookNodeArb = fc.nat({ max: 99 }).map((n) => makeNode(`hook-${n}.json`, {

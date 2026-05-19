@@ -1359,7 +1359,7 @@ describe('CognitiveValidations — estimateTokenCount()', function () {
 describe('CognitiveValidations — estimateContextBudget()', function () {
   it('0 always-loaded steerings → totalTokens=0, budgetPercent=0, perSteering=[]', function () {
     const nodes: GraphNode[] = [
-      makeNode('a.md', { type: 'steering-domain', metadata: { inclusion: 'always' } }),
+      makeNode('a.md', { type: 'steering-domain', metadata: { inclusion: 'auto' } }),
     ];
     const result = estimateContextBudget(nodes);
     assert.strictEqual(result.totalTokens, 0);
@@ -1461,7 +1461,7 @@ describe('CognitiveValidations — estimateContextBudget()', function () {
     const nodes: GraphNode[] = [
       makeNode('a.md', {
         type: 'steering-domain',
-        metadata: { inclusion: 'always', content: 'hello world' },
+        metadata: { inclusion: 'fileMatch', content: 'hello world' },
       }),
       makeNode('b.md', {
         type: 'steering-tech',
