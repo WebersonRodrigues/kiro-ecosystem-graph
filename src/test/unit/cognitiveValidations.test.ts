@@ -7,6 +7,7 @@ import {
   computeDecisionPath,
   computeSemanticCoherence,
   detectCircularHookDependencies,
+  detectPassiveKnowledge,
   isHeaderOnTopic,
   tokenizeHeader,
   KEYWORD_SETS,
@@ -142,7 +143,7 @@ describe('CognitiveValidations — computeFragileLinks()', function () {
     assert.ok(!sources.includes('manual.md'));
   });
 
-  it('source without metadata defaults to always (included)', function () {
+  it('source without metadata defaults to auto (included)', function () {
     const nodes: GraphNode[] = [
       makeNode('a.md', { metadata: undefined }),
       makeNode('b.md'),
@@ -2544,5 +2545,61 @@ describe('CognitiveValidations — computeSemanticCoherence with universal heade
     const result = computeSemanticCoherence(nodes);
     assert.strictEqual(result.length, 1);
     assert.strictEqual(result[0].offTopicHeaders.length, 4);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Passive Knowledge — Domain Threshold (Bug C)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('CognitiveValidations — detectPassiveKnowledge() domain threshold', function () {
+  it('domain steering with 7% actionable ratio is NOT flagged (domain threshold 5%)', function () {
+    const nodes: GraphNode[] = [
+      makeNode('api-patterns.md', { type: 'steering-domain', metadata: { actionableRatio: 0.07 } }),
+    ];
+    const result = detectPassiveKnowledge(nodes);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('domain steering with 4% actionable ratio IS flagged (below domain threshold 5%)', function () {
+    const nodes: GraphNode[] = [
+      makeNode('api-patterns.md', { type: 'steering-domain', metadata: { actionableRatio: 0.04 } }),
+    ];
+    const result = detectPassiveKnowledge(nodes);
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].actionablePercent, 4);
+  });
+
+  it('non-domain steering with 7% actionable ratio IS flagged (standard threshold 10%)', function () {
+    const nodes: GraphNode[] = [
+      makeNode('flow-deploy.md', { type: 'steering-flow', metadata: { actionableRatio: 0.07 } }),
+    ];
+    const result = detectPassiveKnowledge(nodes);
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].actionablePercent, 7);
+  });
+
+  it('non-domain steering with 11% actionable ratio is NOT flagged', function () {
+    const nodes: GraphNode[] = [
+      makeNode('flow-deploy.md', { type: 'steering-flow', metadata: { actionableRatio: 0.11 } }),
+    ];
+    const result = detectPassiveKnowledge(nodes);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('domain steering at exactly 5% is NOT flagged (threshold is exclusive)', function () {
+    const nodes: GraphNode[] = [
+      makeNode('domain-rules.md', { type: 'steering-domain', metadata: { actionableRatio: 0.05 } }),
+    ];
+    const result = detectPassiveKnowledge(nodes);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('domain steering with undefined actionableRatio is NOT flagged', function () {
+    const nodes: GraphNode[] = [
+      makeNode('domain-rules.md', { type: 'steering-domain', metadata: {} }),
+    ];
+    const result = detectPassiveKnowledge(nodes);
+    assert.strictEqual(result.length, 0);
   });
 });

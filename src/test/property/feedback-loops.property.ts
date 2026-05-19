@@ -170,6 +170,9 @@ describe('Feedback Loop Completeness — Property-Based Tests', function () {
       if (hooks.length === 0) { return; }
       const steerings = nodes.filter((n) => n.type?.startsWith('steering-'));
       if (steerings.length === 0) { return; }
+      // Skip graphs with duplicate node IDs (invalid input)
+      const ids = new Set(nodes.map((n) => n.id));
+      if (ids.size !== nodes.length) { return; }
       const before = analyzeFeedbackLoops(nodes, edges);
       const newEdge: GraphEdge = {
         source: hooks[0].id,
@@ -177,12 +180,10 @@ describe('Feedback Loop Completeness — Property-Based Tests', function () {
         type: 'hook-implicit',
       };
       const after = analyzeFeedbackLoops(nodes, [...edges, newEdge]);
-      // Total components should not decrease
       const beforeTotal = before.completeLoops * 4 +
         before.incompleteLoops.reduce((s, e) => s + 4 - e.missing.length, 0);
       const afterTotal = after.completeLoops * 4 +
         after.incompleteLoops.reduce((s, e) => s + 4 - e.missing.length, 0);
-      // Adding an edge can only help or be neutral for the targeted hook
       assert.ok(afterTotal >= beforeTotal - 3,
         `Adding edge should not significantly decrease total components: ${beforeTotal} -> ${afterTotal}`);
     }), { numRuns: 100 });

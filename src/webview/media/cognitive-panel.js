@@ -249,7 +249,7 @@ var CognitivePanel = (function () {
     var queue = [];
     nodes.forEach(function(n) {
       var inclusion = (n.metadata && n.metadata.inclusion) || '';
-      var isEntry = inclusion === 'always' || inclusion === 'auto' ||
+      var isEntry = inclusion === 'always' ||
         n.type === 'hook-auto' || n.type === 'hook-manual';
       if (isEntry) {
         distance[n.id] = 0;
@@ -370,7 +370,8 @@ var CognitivePanel = (function () {
       if (n.type && n.type.indexOf('steering-') === 0) {
         var ratio = (n.metadata && n.metadata.actionableRatio !== undefined)
           ? n.metadata.actionableRatio : 1.0;
-        if (ratio < 0.10) {
+        var threshold = (n.type && n.type.indexOf('domain') !== -1) ? 0.05 : 0.10;
+        if (ratio < threshold) {
           passive.push({
             id: n.id,
             label: n.label,
@@ -848,7 +849,7 @@ var CognitivePanel = (function () {
     var steeringsWithoutHook = [];
     nodes.forEach(function(n) {
       if (n.type && n.type.indexOf('steering-') === 0 && hasDecisionContent(n)) {
-        var inclusion = (n.metadata && n.metadata.inclusion) || 'always';
+        var inclusion = (n.metadata && n.metadata.inclusion) || 'auto';
         if (inclusion !== 'always' && inclusion !== 'auto') {
           if (!steeringFromHooks.has(n.id)) {
             steeringsWithoutHook.push({
@@ -1629,7 +1630,7 @@ var CognitivePanel = (function () {
       return { score: 0, connectivity: 0, contentQuality: 0, completeness: 0, maturity: 0 };
     }
 
-    var connectivityIssues = analysis.steeringsSoltos.length + analysis.vinculosFrageis.length +
+    var connectivityIssues = analysis.steeringsSoltos.length +
       analysis.arquivosSemContexto.length + analysis.coverageGaps.length +
       (analysis.deadLoops || []).length + (analysis.hopsToReach || []).length;
     var connectivity = Math.round(Math.max(0, 100 - (connectivityIssues / totalNodes) * 100));
@@ -1688,7 +1689,7 @@ var CognitivePanel = (function () {
       if (n.type && n.type.indexOf('steering-') === 0) {
         // Skip external/global resolved nodes
         if (n.source && n.source !== 'local' && n.resolved !== false) { return; }
-        var inclusion = (n.metadata && n.metadata.inclusion) || 'always';
+        var inclusion = (n.metadata && n.metadata.inclusion) || 'auto';
         // Exclude fileMatch/manual — don't need cross-references
         if (inclusion === 'fileMatch' || inclusion === 'manual') { return; }
         if ((incomingMap[n.id] || 0) === 0 && (outgoingMap[n.id] || 0) === 0) {
@@ -1712,7 +1713,7 @@ var CognitivePanel = (function () {
           var sType = sNode.type || '';
           var isHook = (sType === 'hook-auto' || sType === 'hook-manual');
           if (!isHook) {
-            var sInclusion = (sNode.metadata && sNode.metadata.inclusion) || 'always';
+            var sInclusion = (sNode.metadata && sNode.metadata.inclusion) || 'auto';
             if (sInclusion === 'fileMatch' || sInclusion === 'manual') { return; }
           }
         }
@@ -1778,7 +1779,7 @@ var CognitivePanel = (function () {
     var largeDomainSteerings = [];
     data.nodes.forEach(function(n) {
       if (n.type && n.type.indexOf('steering-') === 0) {
-        var inclusion = (n.metadata && n.metadata.inclusion) || 'always';
+        var inclusion = (n.metadata && n.metadata.inclusion) || 'auto';
         var lineCount = (n.metadata && n.metadata.lineCount) || 0;
         // Exclude fileMatch/manual — not always-loaded
         if (inclusion === 'fileMatch' || inclusion === 'manual') { return; }
@@ -1832,7 +1833,7 @@ var CognitivePanel = (function () {
     // Steerings that no hook references (have instruction but no automated access/trigger)
     data.nodes.forEach(function(n) {
       if (n.type && n.type.indexOf('steering-') === 0) {
-        var inclusion = (n.metadata && n.metadata.inclusion) || 'always';
+        var inclusion = (n.metadata && n.metadata.inclusion) || 'auto';
         // Only flag manual/fileMatch steerings — always-included ones don't need a hook trigger
         if (inclusion !== 'always' && inclusion !== 'auto' && !steeringsReferencedByHooks.has(n.id)) {
           steeringsWithoutAccess.push({ id: n.id, label: n.label, inclusion: inclusion });
@@ -2351,12 +2352,13 @@ var CognitivePanel = (function () {
     }
     html += '</div>';
 
-    // Fragile Links
-    html += '<div style="margin-bottom:6px;"><span data-fix-header="fragile-links" style="color:#F44336;font-weight:bold;">Fragile Links</span>';
+    // Fragile Links (informational — not a problem, just suggestions)
+    html += '<div style="margin-bottom:6px;"><span data-fix-header="fragile-links" style="color:#2196F3;font-weight:bold;">Fragile Links</span>';
     if (analysis.vinculosFrageis.length === 0) {
       html += ' <span style="color:#4CAF50;">0</span>';
     } else {
-      html += ' <span style="color:#F44336;">' + analysis.vinculosFrageis.length + '</span>';
+      html += ' <span style="color:#2196F3;">' + analysis.vinculosFrageis.length + '</span>';
+      html += '<div style="padding-left:6px;color:#888;font-size:9px;font-style:italic;">These are suggestions, not problems</div>';
       analysis.vinculosFrageis.slice(0, 5).forEach(function(item, idx) {
         html += '<div style="padding-left:6px;color:#888;font-size:9px;" data-fix-item="fragile-links" data-fix-idx="' + idx + '">' + escapeHtml(item.sourceLabel) + ' \u2192 ' + escapeHtml(item.targetLabel) + '</div>';
       });

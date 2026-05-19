@@ -303,7 +303,10 @@ export function detectPassiveKnowledge(
 
   for (const node of nodes) {
     if (node.metadata?.actionableRatio === undefined) { continue; }
-    if (node.metadata.actionableRatio < threshold) {
+    const effectiveThreshold = (node.type && node.type.includes('domain'))
+      ? Math.min(threshold, 0.05)
+      : threshold;
+    if (node.metadata.actionableRatio < effectiveThreshold) {
       results.push({
         id: node.id,
         label: node.label,
@@ -575,7 +578,7 @@ export function computeContextOverload(
 
   for (const n of nodes) {
     if (!n.type || !n.type.startsWith('steering-')) { continue; }
-    const inclusion = (n.metadata && n.metadata.inclusion) || 'always';
+    const inclusion = (n.metadata && n.metadata.inclusion) || 'auto';
     // SKIP fileMatch/manual — not always-loaded
     if (inclusion === 'fileMatch' || inclusion === 'manual') { continue; }
     const lineCount = (n.metadata && n.metadata.lineCount) || 0;
@@ -621,7 +624,7 @@ export function computeOrphanSteerings(
   for (const n of nodes) {
     if (!n.type || !n.type.startsWith('steering-')) { continue; }
     if (n.source && n.source !== 'local' && n.resolved !== false) { continue; }
-    const inclusion = (n.metadata && n.metadata.inclusion) || 'always';
+    const inclusion = (n.metadata && n.metadata.inclusion) || 'auto';
     // SKIP fileMatch/manual — don't need cross-references
     if (inclusion === 'fileMatch' || inclusion === 'manual') { continue; }
     if ((incomingMap[n.id] || 0) === 0 && (outgoingMap[n.id] || 0) === 0) {
@@ -767,7 +770,7 @@ export function computeFragileLinks(
       const sType = sourceNode.type || '';
       const isHook = sType === 'hook-auto' || sType === 'hook-manual';
       if (!isHook) {
-        const inclusion = (sourceNode.metadata && sourceNode.metadata.inclusion) || 'always';
+        const inclusion = (sourceNode.metadata && sourceNode.metadata.inclusion) || 'auto';
         if (inclusion === 'fileMatch' || inclusion === 'manual') { continue; }
       }
     }
@@ -878,7 +881,7 @@ export function computeSteeringsWithoutAccess(
   const result: Array<{ id: string; label: string; inclusion: string }> = [];
   for (const n of nodes) {
     if (!n.type || !n.type.startsWith('steering-')) { continue; }
-    const inclusion = (n.metadata && n.metadata.inclusion) || 'always';
+    const inclusion = (n.metadata && n.metadata.inclusion) || 'auto';
     if (inclusion !== 'always' && inclusion !== 'auto' && !steeringsReferencedByHooks.has(n.id)) {
       result.push({ id: n.id, label: n.label, inclusion });
     }
@@ -932,7 +935,7 @@ export function computeDecisionPath(
   const steeringsWithoutHook: Array<{ id: string; label: string }> = [];
   for (const n of nodes) {
     if (!n.type || !n.type.startsWith('steering-')) { continue; }
-    const inclusion = (n.metadata && n.metadata.inclusion) || 'always';
+    const inclusion = (n.metadata && n.metadata.inclusion) || 'auto';
     if (inclusion === 'always' || inclusion === 'auto') { continue; }
     const keywords = (n.metadata && n.metadata.keywords) || [];
     const hasDecision = keywords.some((kw: string) => DECISION_KEYWORDS.includes(kw.toLowerCase()));

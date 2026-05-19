@@ -475,4 +475,90 @@ describe('ParserService', function () {
       assert.strictEqual(result!.node.metadata?.hookPrompt, '');
     });
   });
+
+  describe('parseHook() — #name reference detection', function () {
+    it('creates edge for #name pattern when name.md exists in knownSteeringFiles', function () {
+      const file = createMockEcosystemFile('.kiro/hooks/commit.json');
+      const content = JSON.stringify({
+        name: 'Commit Hook',
+        when: { type: 'postToolUse' },
+        then: { prompt: 'Follow the rules in #commit-message when writing commits.' },
+      });
+      const knownFiles = new Map<string, string>([
+        ['commit-message.md', '.kiro/steering/commit-message.md'],
+      ]);
+
+      const result = parserService.parseHook(file, content, knownFiles);
+      assert.ok(result !== null);
+      assert.strictEqual(result!.references.length, 1);
+      assert.strictEqual(result!.references[0].target, '.kiro/steering/commit-message.md');
+      assert.strictEqual(result!.references[0].type, 'backtick-ref');
+    });
+
+    it('creates multiple edges for multiple #name patterns', function () {
+      const file = createMockEcosystemFile('.kiro/hooks/review.json');
+      const content = JSON.stringify({
+        name: 'Review Hook',
+        when: { type: 'postToolUse' },
+        then: { prompt: 'Check #code-conventions and #security-policies before approving.' },
+      });
+      const knownFiles = new Map<string, string>([
+        ['code-conventions.md', '.kiro/steering/code-conventions.md'],
+        ['security-policies.md', '.kiro/steering/security-policies.md'],
+      ]);
+
+      const result = parserService.parseHook(file, content, knownFiles);
+      assert.ok(result !== null);
+      assert.strictEqual(result!.references.length, 2);
+      assert.ok(result!.references.some((r) => r.target === '.kiro/steering/code-conventions.md'));
+      assert.ok(result!.references.some((r) => r.target === '.kiro/steering/security-policies.md'));
+    });
+
+    it('does not create edge for #name when name.md is not in knownSteeringFiles', function () {
+      const file = createMockEcosystemFile('.kiro/hooks/test.json');
+      const content = JSON.stringify({
+        name: 'Test Hook',
+        when: { type: 'fileEdited' },
+        then: { prompt: 'Reference #unknown-steering for context.' },
+      });
+      const knownFiles = new Map<string, string>();
+
+      const result = parserService.parseHook(file, content, knownFiles);
+      assert.ok(result !== null);
+      assert.strictEqual(result!.references.length, 0);
+    });
+
+    it('deduplicates #name against backtick-ref for same steering', function () {
+      const file = createMockEcosystemFile('.kiro/hooks/dedup.json');
+      const content = JSON.stringify({
+        name: 'Dedup Hook',
+        when: { type: 'postToolUse' },
+        then: { prompt: 'See `commit-message.md` and also #commit-message for rules.' },
+      });
+      const knownFiles = new Map<string, string>([
+        ['commit-message.md', '.kiro/steering/commit-message.md'],
+      ]);
+
+      const result = parserService.parseHook(file, content, knownFiles);
+      assert.ok(result !== null);
+      assert.strictEqual(result!.references.length, 1);
+      assert.strictEqual(result!.references[0].target, '.kiro/steering/commit-message.md');
+    });
+
+    it('does not match #name patterns starting with uppercase', function () {
+      const file = createMockEcosystemFile('.kiro/hooks/upper.json');
+      const content = JSON.stringify({
+        name: 'Upper Hook',
+        when: { type: 'fileEdited' },
+        then: { prompt: 'See #Commit-Message for rules.' },
+      });
+      const knownFiles = new Map<string, string>([
+        ['Commit-Message.md', '.kiro/steering/Commit-Message.md'],
+      ]);
+
+      const result = parserService.parseHook(file, content, knownFiles);
+      assert.ok(result !== null);
+      assert.strictEqual(result!.references.length, 0);
+    });
+  });
 });

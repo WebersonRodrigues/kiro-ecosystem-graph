@@ -67,8 +67,8 @@ describe('HealthScoreCalculator', function () {
       const data = createMinimalAnalysis();
       data.steeringsSoltos = [{ id: 'a', label: 'a' }, { id: 'b', label: 'b' }];
       data.vinculosFrageis = [{ source: 'x', target: 'y', sourceLabel: 'x', targetLabel: 'y' }];
-      // 3 issues out of 10 nodes = 30% issues = 70 score
-      assert.strictEqual(computeConnectivitySubScore(data, 10), 70);
+      // 2 issues out of 10 nodes = 20% issues = 80 score (vinculosFrageis excluded from count)
+      assert.strictEqual(computeConnectivitySubScore(data, 10), 80);
     });
 
     it('counts all connectivity issue types', function () {
@@ -79,8 +79,8 @@ describe('HealthScoreCalculator', function () {
       data.coverageGaps = [{ folder: 'f' }];
       data.deadLoops = [{ nodes: [{ id: 'c', label: 'c' }], size: 1 }];
       data.hopsToReach = [{ id: 'd', label: 'd', hops: 5 }];
-      // 6 issues out of 10 nodes = 60% issues = 40 score
-      assert.strictEqual(computeConnectivitySubScore(data, 10), 40);
+      // 5 issues out of 10 nodes = 50% issues = 50 score (vinculosFrageis excluded)
+      assert.strictEqual(computeConnectivitySubScore(data, 10), 50);
     });
 
     it('floors at 0 when issues exceed nodes', function () {
@@ -88,6 +88,17 @@ describe('HealthScoreCalculator', function () {
       data.steeringsSoltos = [{ id: 'a', label: 'a' }, { id: 'b', label: 'b' }, { id: 'c', label: 'c' }];
       // 3 issues out of 2 nodes = 150% issues → clamped to 0
       assert.strictEqual(computeConnectivitySubScore(data, 2), 0);
+    });
+
+    it('does not count vinculosFrageis in connectivity issues', function () {
+      const data = createMinimalAnalysis();
+      data.vinculosFrageis = [
+        { source: 'a', target: 'b', sourceLabel: 'a', targetLabel: 'b' },
+        { source: 'c', target: 'd', sourceLabel: 'c', targetLabel: 'd' },
+        { source: 'e', target: 'f', sourceLabel: 'e', targetLabel: 'f' },
+      ];
+      // Fragile links should NOT affect connectivity score
+      assert.strictEqual(computeConnectivitySubScore(data, 10), 100);
     });
   });
 

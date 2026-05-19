@@ -269,7 +269,8 @@ describe('Cognitive Validations — Passive Knowledge (Property)', function () {
 
     fc.assert(
       fc.property(ratioArb, (ratio) => {
-        const nodes = [makeNode('test.md', { metadata: { actionableRatio: ratio } })];
+        // Use steering-policy (non-domain) to test standard 0.10 threshold
+        const nodes = [makeNode('test.md', { type: 'steering-policy', metadata: { actionableRatio: ratio } })];
         const results = detectPassiveKnowledge(nodes, 0.10);
         assert.strictEqual(results.length, 1);
       }),
@@ -838,7 +839,7 @@ describe('Preservation — Context Overload keeps always/auto steerings (Propert
     );
   });
 
-  it('steerings without inclusion (default always) and >350 lines ARE in overload', function () {
+  it('steerings without inclusion (default auto) and >350 lines are NOT in overload', function () {
     const lineCountArb = fc.integer({ min: 351, max: 5000 });
 
     fc.assert(
@@ -848,8 +849,9 @@ describe('Preservation — Context Overload keeps always/auto steerings (Propert
           metadata: { lineCount },
         });
         const result = computeContextOverload([node]);
-        assert.strictEqual(result.overloaded.length, 1);
-        assert.strictEqual(result.totalAlwaysLines, lineCount);
+        // No front-matter = default 'auto' → NOT counted as always-loaded
+        assert.strictEqual(result.overloaded.length, 0);
+        assert.strictEqual(result.totalAlwaysLines, 0);
       }),
       { numRuns: 30 },
     );
@@ -1244,7 +1246,7 @@ describe('Fragile Links Filter (Property)', function () {
           const sType = sourceNode!.type || '';
           const isHook = sType === 'hook-auto' || sType === 'hook-manual';
           if (!isHook) {
-            const inclusion = (sourceNode!.metadata && sourceNode!.metadata.inclusion) || 'always';
+            const inclusion = (sourceNode!.metadata && sourceNode!.metadata.inclusion) || 'auto';
             assert.ok(
               inclusion === 'always' || inclusion === 'auto',
               `Non-hook source should have always/auto inclusion, got ${inclusion}`,
@@ -1259,7 +1261,7 @@ describe('Fragile Links Filter (Property)', function () {
           const sType = sourceNode.type || '';
           const isHook = sType === 'hook-auto' || sType === 'hook-manual';
           if (!isHook) {
-            const inclusion = (sourceNode.metadata && sourceNode.metadata.inclusion) || 'always';
+            const inclusion = (sourceNode.metadata && sourceNode.metadata.inclusion) || 'auto';
             if (inclusion === 'fileMatch' || inclusion === 'manual') {
               assert.ok(
                 !result.some((r) => r.source === edge.source),

@@ -223,6 +223,7 @@ export class ParserService {
 
     if (prompt) {
       this.extractHookPromptRefs(prompt, file, knownSteeringFiles, references, seen);
+      this.extractHashNameRefs(prompt, file, knownSteeringFiles, references, seen);
     }
 
     // Extract implicit hook edges from toolTypes and when.patterns
@@ -291,6 +292,36 @@ export class ParserService {
     while ((match = bareRegex.exec(prompt)) !== null) {
       const refName = match[1];
       const targetPath = knownSteeringFiles.get(refName);
+      if (targetPath && !seen.has(targetPath)) {
+        seen.add(targetPath);
+        references.push({
+          source: file.relativePath,
+          target: targetPath,
+          type: 'backtick-ref',
+          line: 0,
+        });
+      }
+    }
+  }
+
+  /**
+   * Scans a hook's prompt for `#name` patterns (e.g., `#commit-message`).
+   * Creates backtick-ref edges when `name + '.md'` exists in knownSteeringFiles.
+   * Deduplicates against the shared `seen` set.
+   */
+  private extractHashNameRefs(
+    prompt: string,
+    file: EcosystemFile,
+    knownSteeringFiles: Map<string, string>,
+    references: Reference[],
+    seen: Set<string>,
+  ): void {
+    const hashNameRegex = /#([a-z][\w-]+)/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = hashNameRegex.exec(prompt)) !== null) {
+      const name = match[1];
+      const targetPath = knownSteeringFiles.get(name + '.md');
       if (targetPath && !seen.has(targetPath)) {
         seen.add(targetPath);
         references.push({

@@ -18,7 +18,6 @@ export function computeConnectivitySubScore(
   }
   const issueCount =
     data.steeringsSoltos.length +
-    data.vinculosFrageis.length +
     data.arquivosSemContexto.length +
     data.coverageGaps.length +
     data.deadLoops.length +
