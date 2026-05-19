@@ -103,7 +103,10 @@ export function isTableSeparator(line: string): boolean {
 
 const IMPERATIVE_REGEX = /\b(use|create|always|never|must|should|shall|ensure|implement|avoid|prefer)\b/i;
 const DO_NOT_REGEX = /\b(do not|don't|cannot|can't)\b/i;
-const PT_BR_REGEX = /\b(crie|sempre|nunca|deve|faça|evite|garanta|implemente)\b/i;
+const PT_BR_REGEX = /\b(crie|sempre|nunca|deve|faça|evite|garanta|implemente|verificar|usar|configurar|documentar|testar|validar|manter|utilizar|aplicar|seguir|respeitar|incluir|remover|adicionar|corrigir|atualizar)\b/i;
+const PTBR_OBLIGATION_REGEX = /\b(obrigatório|proibido|permitido)\b/i;
+const PTBR_NEGATION_REGEX = /\bnão\s+\w+/i;
+const PTBR_CAPS_REGEX = /\b(OBRIGATÓRIO|PROIBIDO|PERMITIDO|REGRA|CRÍTICO|IMPORTANTE)\b/;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
@@ -240,7 +243,10 @@ function isExcludedLine(line: string): boolean {
 function isActionableLine(line: string): boolean {
   return IMPERATIVE_REGEX.test(line) ||
     DO_NOT_REGEX.test(line) ||
-    PT_BR_REGEX.test(line);
+    PT_BR_REGEX.test(line) ||
+    PTBR_OBLIGATION_REGEX.test(line) ||
+    PTBR_NEGATION_REGEX.test(line) ||
+    PTBR_CAPS_REGEX.test(line);
 }
 
 /** Pattern mapping for imperative extraction */

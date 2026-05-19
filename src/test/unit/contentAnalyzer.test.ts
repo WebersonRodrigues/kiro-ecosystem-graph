@@ -431,4 +431,174 @@ describe('ContentAnalyzer', function () {
       assert.strictEqual(ratio, 2 / 5);
     });
   });
+
+  describe('PT-BR expanded verbs detection', function () {
+    const expandedVerbs = [
+      'verificar', 'usar', 'configurar', 'documentar',
+      'testar', 'validar', 'manter', 'utilizar',
+      'aplicar', 'seguir', 'respeitar', 'incluir',
+      'remover', 'adicionar', 'corrigir', 'atualizar',
+    ];
+
+    for (const verb of expandedVerbs) {
+      it(`detects "${verb}" as actionable`, function () {
+        const content = `${verb} os padrões do projeto`;
+        const ratio = computeActionableRatio(content);
+        assert.strictEqual(ratio, 1.0);
+      });
+    }
+
+    it('detects original PT-BR verbs still work', function () {
+      const originalVerbs = [
+        'crie', 'sempre', 'nunca', 'deve',
+        'faça', 'evite', 'garanta', 'implemente',
+      ];
+      for (const verb of originalVerbs) {
+        const content = `${verb} algo importante`;
+        const ratio = computeActionableRatio(content);
+        assert.strictEqual(ratio, 1.0, `Expected "${verb}" to be actionable`);
+      }
+    });
+  });
+
+  describe('PT-BR obligation markers detection', function () {
+    it('detects "obrigatório" case-insensitive', function () {
+      const ratio = computeActionableRatio('obrigatório usar TypeScript');
+      assert.strictEqual(ratio, 1.0);
+    });
+
+    it('detects "Obrigatório" capitalized', function () {
+      const ratio = computeActionableRatio('Obrigatório seguir padrões');
+      assert.strictEqual(ratio, 1.0);
+    });
+
+    it('detects "proibido" case-insensitive', function () {
+      const ratio = computeActionableRatio('proibido commitar na main');
+      assert.strictEqual(ratio, 1.0);
+    });
+
+    it('detects "permitido" case-insensitive', function () {
+      const ratio = computeActionableRatio('permitido apenas em staging');
+      assert.strictEqual(ratio, 1.0);
+    });
+  });
+
+  describe('PT-BR negation pattern detection', function () {
+    it('detects "não + verb" pattern', function () {
+      const ratio = computeActionableRatio('não commitar direto na main');
+      assert.strictEqual(ratio, 1.0);
+    });
+
+    it('detects "não usar" pattern', function () {
+      const ratio = computeActionableRatio('não usar any em TypeScript');
+      assert.strictEqual(ratio, 1.0);
+    });
+
+    it('detects "não alterar" pattern', function () {
+      const ratio = computeActionableRatio('não alterar arquivos de config');
+      assert.strictEqual(ratio, 1.0);
+    });
+  });
+
+  describe('PT-BR all-caps emphasis keywords detection', function () {
+    it('detects "OBRIGATÓRIO" all-caps', function () {
+      const ratio = computeActionableRatio('OBRIGATÓRIO usar TypeScript');
+      assert.strictEqual(ratio, 1.0);
+    });
+
+    it('detects "PROIBIDO" all-caps', function () {
+      const ratio = computeActionableRatio('PROIBIDO push direto na main');
+      assert.strictEqual(ratio, 1.0);
+    });
+
+    it('detects "PERMITIDO" all-caps', function () {
+      const ratio = computeActionableRatio('PERMITIDO apenas em dev');
+      assert.strictEqual(ratio, 1.0);
+    });
+
+    it('detects "REGRA" all-caps', function () {
+      const ratio = computeActionableRatio('REGRA de nomenclatura');
+      assert.strictEqual(ratio, 1.0);
+    });
+
+    it('detects "CRÍTICO" all-caps', function () {
+      const ratio = computeActionableRatio('CRÍTICO manter testes verdes');
+      assert.strictEqual(ratio, 1.0);
+    });
+
+    it('detects "IMPORTANTE" all-caps', function () {
+      const ratio = computeActionableRatio('IMPORTANTE revisar antes de merge');
+      assert.strictEqual(ratio, 1.0);
+    });
+  });
+
+  describe('PT-BR combined multi-line actionableRatio', function () {
+    it('computes correct ratio for mixed PT-BR content', function () {
+      const content = [
+        'Descrição do projeto.',
+        'verificar se os testes passam',
+        'OBRIGATÓRIO usar TypeScript',
+        'não commitar na main',
+        'Outra linha descritiva.',
+      ].join('\n');
+      const ratio = computeActionableRatio(content);
+      // 3 actionable out of 5 non-empty lines
+      assert.strictEqual(ratio, 3 / 5);
+    });
+
+    it('computes 1.0 for all-actionable PT-BR content', function () {
+      const content = [
+        'verificar cobertura de testes',
+        'PROIBIDO usar any',
+        'não alterar configs de prod',
+        'sempre documentar decisões',
+      ].join('\n');
+      const ratio = computeActionableRatio(content);
+      assert.strictEqual(ratio, 1.0);
+    });
+  });
+
+  describe('Preservation: EN imperatives still work', function () {
+    it('detects English imperative verbs', function () {
+      const enVerbs = [
+        'use', 'create', 'always', 'never', 'must',
+        'should', 'shall', 'ensure', 'implement', 'avoid', 'prefer',
+      ];
+      for (const verb of enVerbs) {
+        const content = `${verb} proper error handling`;
+        const ratio = computeActionableRatio(content);
+        assert.strictEqual(ratio, 1.0, `Expected EN verb "${verb}" to be actionable`);
+      }
+    });
+
+    it('detects English negation patterns', function () {
+      const patterns = ['do not', "don't", 'cannot', "can't"];
+      for (const pat of patterns) {
+        const content = `${pat} skip validation`;
+        const ratio = computeActionableRatio(content);
+        assert.strictEqual(ratio, 1.0, `Expected "${pat}" to be actionable`);
+      }
+    });
+  });
+
+  describe('Preservation: excluded lines still excluded', function () {
+    it('excludes empty lines', function () {
+      const content = ['', '', 'Always test.', ''].join('\n');
+      const ratio = computeActionableRatio(content);
+      // 1 actionable out of 1 non-empty
+      assert.strictEqual(ratio, 1.0);
+    });
+
+    it('excludes --- separators', function () {
+      const content = ['---', 'Always test.', '---'].join('\n');
+      const ratio = computeActionableRatio(content);
+      assert.strictEqual(ratio, 1.0);
+    });
+
+    it('excludes === separators', function () {
+      const content = ['===', 'Always test.', '==='].join('\n');
+      const ratio = computeActionableRatio(content);
+      assert.strictEqual(ratio, 1.0);
+    });
+  });
 });
