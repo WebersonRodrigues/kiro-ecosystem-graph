@@ -14,6 +14,9 @@ import {
   isVagueInstruction,
   computeSpecificityScore,
   analyzeInstructionSpecificity,
+  INLINE_RISK_KEYWORDS,
+  hasInlineRiskCriteria,
+  computeDmlProtectionLevel,
 } from '../../services/cognitiveValidations';
 import type { GraphNode, GraphEdge, NodeType } from '../../types';
 
@@ -2186,5 +2189,155 @@ describe('CognitiveValidations — analyzeFeedbackLoops()', function () {
     for (const entry of result.incompleteLoops) {
       assert.ok(!entry.missing.includes('Detection'));
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Inline Risk Criteria (DML Protection Bugfix — Spec 23)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('CognitiveValidations — hasInlineRiskCriteria()', function () {
+  it('returns false with 0 keywords in prompt', function () {
+    const node = makeNode('hook.json', {
+      type: 'hook-auto',
+      metadata: { hookPrompt: 'verify the query before executing' },
+    });
+    assert.strictEqual(hasInlineRiskCriteria(node), false);
+  });
+
+  it('returns false with 1 keyword in prompt', function () {
+    const node = makeNode('hook.json', {
+      type: 'hook-auto',
+      metadata: { hookPrompt: 'check risk level before running' },
+    });
+    assert.strictEqual(hasInlineRiskCriteria(node), false);
+  });
+
+  it('returns false with 2 keywords in prompt', function () {
+    const node = makeNode('hook.json', {
+      type: 'hook-auto',
+      metadata: { hookPrompt: 'check risk level and critical operations' },
+    });
+    assert.strictEqual(hasInlineRiskCriteria(node), false);
+  });
+
+  it('returns true with exactly 3 keywords in prompt', function () {
+    const node = makeNode('hook.json', {
+      type: 'hook-auto',
+      metadata: { hookPrompt: 'check risk level, critical operations, and high impact' },
+    });
+    assert.strictEqual(hasInlineRiskCriteria(node), true);
+  });
+
+  it('returns true with 5+ keywords in prompt', function () {
+    const node = makeNode('hook.json', {
+      type: 'hook-auto',
+      metadata: {
+        hookPrompt: 'Avaliar risco da operação. Se critico ou alto, recusar. Verificar count antes.',
+      },
+    });
+    assert.strictEqual(hasInlineRiskCriteria(node), true);
+  });
+
+  it('detects mixed EN/PT-BR keywords', function () {
+    const node = makeNode('hook.json', {
+      type: 'hook-auto',
+      metadata: { hookPrompt: 'check risk, avaliar risco, refuse if critical' },
+    });
+    assert.strictEqual(hasInlineRiskCriteria(node), true);
+  });
+
+  it('detects multi-word keywords "sem where"', function () {
+    const node = makeNode('hook.json', {
+      type: 'hook-auto',
+      metadata: { hookPrompt: 'recusar operação sem where em tabela critica' },
+    });
+    assert.strictEqual(hasInlineRiskCriteria(node), true);
+  });
+
+  it('detects multi-word keywords "without where" and "critical table"', function () {
+    const node = makeNode('hook.json', {
+      type: 'hook-auto',
+      metadata: { hookPrompt: 'refuse operations without where on critical table with high risk' },
+    });
+    assert.strictEqual(hasInlineRiskCriteria(node), true);
+  });
+
+  it('returns false with empty description and no hookPrompt', function () {
+    const node = makeNode('hook.json', {
+      type: 'hook-auto',
+      metadata: { description: '' },
+    });
+    assert.strictEqual(hasInlineRiskCriteria(node), false);
+  });
+
+  it('returns false with undefined metadata', function () {
+    const node = makeNode('hook.json', {
+      type: 'hook-auto',
+      metadata: undefined,
+    });
+    assert.strictEqual(hasInlineRiskCriteria(node), false);
+  });
+
+  it('uses description as fallback when hookPrompt is absent', function () {
+    const node = makeNode('hook.json', {
+      type: 'hook-auto',
+      metadata: { description: 'avaliar risco critico e recusar operações perigosas' },
+    });
+    assert.strictEqual(hasInlineRiskCriteria(node), true);
+  });
+
+  it('concatenates hookPrompt and description for keyword matching', function () {
+    const node = makeNode('hook.json', {
+      type: 'hook-auto',
+      metadata: {
+        hookPrompt: 'check risk level',
+        description: 'critical operations must be refused',
+      },
+    });
+    // risk + critical + refuse = 3 keywords across both fields
+    assert.strictEqual(hasInlineRiskCriteria(node), true);
+  });
+
+  it('is case-insensitive', function () {
+    const node = makeNode('hook.json', {
+      type: 'hook-auto',
+      metadata: { hookPrompt: 'RISK assessment for CRITICAL and HIGH impact operations' },
+    });
+    assert.strictEqual(hasInlineRiskCriteria(node), true);
+  });
+});
+
+describe('CognitiveValidations — computeDmlProtectionLevel with hasInlineRisk', function () {
+  it('returns level 2 when hasDmlHook=true and hasInlineRisk=true', function () {
+    assert.strictEqual(computeDmlProtectionLevel(true, true, false, true), 2);
+  });
+
+  it('returns level 2 when hasDmlHook=true, hasInlineRisk=true, no steering', function () {
+    assert.strictEqual(computeDmlProtectionLevel(true, false, false, true), 2);
+  });
+
+  it('returns level 2 when hasRiskIntegration=true (existing path preserved)', function () {
+    assert.strictEqual(computeDmlProtectionLevel(true, true, true, false), 2);
+  });
+
+  it('returns level 1 when hasInlineRisk=false and no risk integration', function () {
+    assert.strictEqual(computeDmlProtectionLevel(true, true, false, false), 1);
+  });
+
+  it('returns level 0 when no hook and no steering', function () {
+    assert.strictEqual(computeDmlProtectionLevel(false, false, false, false), 0);
+  });
+
+  it('backward compatible: omitted hasInlineRisk preserves level 1', function () {
+    assert.strictEqual(computeDmlProtectionLevel(true, true, false), 1);
+  });
+
+  it('backward compatible: omitted hasInlineRisk preserves level 2 with risk integration', function () {
+    assert.strictEqual(computeDmlProtectionLevel(true, true, true), 2);
+  });
+
+  it('backward compatible: omitted hasInlineRisk preserves level 0', function () {
+    assert.strictEqual(computeDmlProtectionLevel(false, false, false), 0);
   });
 });

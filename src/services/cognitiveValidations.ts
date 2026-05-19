@@ -493,23 +493,55 @@ export function computeQualityGateLevel(
 // DML Protection
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Bilingual risk keywords for inline risk criteria detection */
+export const INLINE_RISK_KEYWORDS: readonly string[] = [
+  'risco', 'risk', 'critico', 'critical', 'alto', 'high',
+  'medio', 'medium', 'baixo', 'low', 'recusar', 'refuse',
+  'sem where', 'without where', 'count', 'tabela critica',
+  'critical table',
+];
+
+/**
+ * Checks whether a hook node contains inline risk criteria in its prompt
+ * or description. Returns true when 3+ keywords from INLINE_RISK_KEYWORDS
+ * are found in the concatenated lowercased hookPrompt + description.
+ *
+ * @param hookNode - The graph node to evaluate
+ * @returns true if the node has 3+ inline risk keywords
+ */
+export function hasInlineRiskCriteria(hookNode: GraphNode): boolean {
+  const prompt = (hookNode.metadata?.hookPrompt || '').toLowerCase();
+  const desc = (hookNode.metadata?.description || '').toLowerCase();
+  const text = prompt + ' ' + desc;
+  let matchCount = 0;
+  for (const kw of INLINE_RISK_KEYWORDS) {
+    if (text.includes(kw)) {
+      matchCount++;
+      if (matchCount >= 3) { return true; }
+    }
+  }
+  return false;
+}
+
 /**
  * Computes DML protection maturity level.
  * Level 0: No protection (no DML hook)
  * Level 1: Blind block (has hook + steering but no risk integration)
- * Level 2: Smart protection (has hook + steering + risk integration)
+ * Level 2: Smart protection (has hook + steering + risk integration OR inline risk)
  *
  * @param hasDmlHook - Whether a DML preToolUse hook exists
  * @param hasDmlSteering - Whether a DML steering exists
  * @param hasRiskIntegration - Whether the hook references a risk-assessment steering
+ * @param hasInlineRisk - Whether the hook contains inline risk criteria (3+ keywords)
  * @returns Maturity level 0, 1, or 2
  */
 export function computeDmlProtectionLevel(
   hasDmlHook: boolean,
   hasDmlSteering: boolean,
   hasRiskIntegration: boolean,
+  hasInlineRisk?: boolean,
 ): 0 | 1 | 2 {
-  if (hasDmlHook && hasDmlSteering && hasRiskIntegration) { return 2; }
+  if (hasDmlHook && (hasRiskIntegration || hasInlineRisk)) { return 2; }
   if (hasDmlHook && hasDmlSteering) { return 1; }
   if (hasDmlHook || hasDmlSteering) { return 1; }
   return 0;

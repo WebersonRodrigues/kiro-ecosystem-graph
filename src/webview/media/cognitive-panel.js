@@ -984,6 +984,32 @@ var CognitivePanel = (function () {
     'irreversível', 'destructive', 'destrutivo',
   ];
 
+  var INLINE_RISK_KEYWORDS = [
+    'risco', 'risk', 'critico', 'critical', 'alto', 'high',
+    'medio', 'medium', 'baixo', 'low', 'recusar', 'refuse',
+    'sem where', 'without where', 'count', 'tabela critica',
+    'critical table',
+  ];
+
+  /**
+   * Check if a hook node has inline risk criteria (3+ keywords in prompt/description).
+   * @param {object} hookNode
+   * @returns {boolean}
+   */
+  function hasInlineRiskCriteria(hookNode) {
+    var prompt = ((hookNode.metadata && hookNode.metadata.hookPrompt) || '').toLowerCase();
+    var desc = ((hookNode.metadata && hookNode.metadata.description) || '').toLowerCase();
+    var text = prompt + ' ' + desc;
+    var matchCount = 0;
+    for (var i = 0; i < INLINE_RISK_KEYWORDS.length; i++) {
+      if (text.indexOf(INLINE_RISK_KEYWORDS[i]) !== -1) {
+        matchCount++;
+        if (matchCount >= 3) { return true; }
+      }
+    }
+    return false;
+  }
+
   /**
    * Check DML protection maturity level.
    * @param {any[]} nodes
@@ -1000,8 +1026,17 @@ var CognitivePanel = (function () {
     var hasDmlSteering = dmlSteerings.length > 0;
     var hasRiskIntegration = hooksWithRiskSteering.length > 0;
 
+    // Check inline risk criteria in DML hooks
+    var hasInlineRisk = false;
+    for (var i = 0; i < dmlHooks.length; i++) {
+      if (hasInlineRiskCriteria(dmlHooks[i])) {
+        hasInlineRisk = true;
+        break;
+      }
+    }
+
     var maturityLevel = 0;
-    if (hasDmlHook && hasRiskIntegration) {
+    if (hasDmlHook && (hasRiskIntegration || hasInlineRisk)) {
       maturityLevel = 2;
     } else if (hasDmlHook || hasDmlSteering) {
       maturityLevel = 1;
@@ -1016,7 +1051,7 @@ var CognitivePanel = (function () {
       missing: {
         needsDmlHook: !hasDmlHook,
         needsDmlSteering: !hasDmlSteering,
-        needsRiskIntegration: !hasRiskIntegration,
+        needsRiskIntegration: !hasRiskIntegration && !hasInlineRisk,
       },
     };
   }
