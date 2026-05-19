@@ -496,7 +496,7 @@ export class ParserService {
   }
 
   /**
-   * Extracts backtick-wrapped .md filename references.
+   * Extracts backtick-wrapped .md filename references and extensionless steering names.
    * Only creates edges for references that match a filename in the knownSteeringFiles list.
    * This prevents noise from code examples that happen to mention .md filenames.
    */
@@ -506,21 +506,18 @@ export class ParserService {
     knownSteeringFiles: Map<string, string>,
     references: Reference[]
   ): void {
+    const seen = new Set<string>();
+
     for (let i = 0; i < lines.length; i++) {
       const regex = new RegExp(PATTERNS.backtickRef.source, 'g');
       let match: RegExpExecArray | null;
 
       while ((match = regex.exec(lines[i])) !== null) {
         const refName = match[1];
-
-        // Only create edge if the backtick ref matches a known steering file
-        if (!knownSteeringFiles.has(refName)) {
-          continue;
-        }
-
-        // Resolve to the actual path of the discovered file (cross-workspace)
+        if (!knownSteeringFiles.has(refName)) { continue; }
         const resolvedPath = knownSteeringFiles.get(refName)!;
-
+        if (seen.has(resolvedPath)) { continue; }
+        seen.add(resolvedPath);
         references.push({
           source: file.relativePath,
           target: resolvedPath,
@@ -528,6 +525,38 @@ export class ParserService {
           line: i + 1,
         });
       }
+
+      this.extractExtensionlessBacktickRefs(lines[i], i, file, knownSteeringFiles, references, seen);
+    }
+  }
+
+  /**
+   * Second-pass: matches backtick names WITHOUT extension and resolves via name + '.md'.
+   * Only matches names without any dot to avoid false positives from code like `file.ts`.
+   */
+  private extractExtensionlessBacktickRefs(
+    line: string,
+    lineIndex: number,
+    file: SteeringFile,
+    knownSteeringFiles: Map<string, string>,
+    references: Reference[],
+    seen: Set<string>
+  ): void {
+    const regex = /`([a-z][\w-]+)`/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(line)) !== null) {
+      const name = match[1];
+      if (name.includes('.')) { continue; }
+      const resolvedPath = knownSteeringFiles.get(name + '.md');
+      if (!resolvedPath || seen.has(resolvedPath)) { continue; }
+      seen.add(resolvedPath);
+      references.push({
+        source: file.relativePath,
+        target: resolvedPath,
+        type: 'backtick-ref',
+        line: lineIndex + 1,
+      });
     }
   }
 

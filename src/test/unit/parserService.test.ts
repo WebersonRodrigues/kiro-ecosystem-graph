@@ -305,6 +305,87 @@ describe('ParserService', function () {
     });
   });
 
+  describe('extractBacktickRefs — extensionless backtick refs', function () {
+    it('creates backtick-ref edge when extensionless name + .md exists in knownSteeringFiles', function () {
+      const file = createMockSteeringFile();
+      const content = 'Reference `security-policies` for guidelines.';
+      const knownFiles = new Map<string, string>([
+        ['security-policies.md', '.kiro/steering/security-policies.md'],
+      ]);
+
+      const result = parserService.parse(file, content, knownFiles);
+      const btRefs = result.references.filter((r) => r.type === 'backtick-ref');
+      assert.strictEqual(btRefs.length, 1);
+      assert.strictEqual(btRefs[0].target, '.kiro/steering/security-policies.md');
+    });
+
+    it('creates edges for multiple extensionless refs on the same line', function () {
+      const file = createMockSteeringFile();
+      const content = 'See `help-faq` and `code-conventions` for details.';
+      const knownFiles = new Map<string, string>([
+        ['help-faq.md', '.kiro/steering/help-faq.md'],
+        ['code-conventions.md', '.kiro/steering/code-conventions.md'],
+      ]);
+
+      const result = parserService.parse(file, content, knownFiles);
+      const btRefs = result.references.filter((r) => r.type === 'backtick-ref');
+      assert.strictEqual(btRefs.length, 2);
+      assert.ok(btRefs.some((r) => r.target === '.kiro/steering/help-faq.md'));
+      assert.ok(btRefs.some((r) => r.target === '.kiro/steering/code-conventions.md'));
+    });
+
+    it('does not create duplicate edge when both name.md and name appear', function () {
+      const file = createMockSteeringFile();
+      const content = 'See `help-faq.md` and also `help-faq` for info.';
+      const knownFiles = new Map<string, string>([
+        ['help-faq.md', '.kiro/steering/help-faq.md'],
+      ]);
+
+      const result = parserService.parse(file, content, knownFiles);
+      const btRefs = result.references.filter((r) => r.type === 'backtick-ref');
+      assert.strictEqual(btRefs.length, 1);
+      assert.strictEqual(btRefs[0].target, '.kiro/steering/help-faq.md');
+    });
+
+    it('does not create edges for code keywords', function () {
+      const file = createMockSteeringFile();
+      const content = 'Use `const` and `function` and `import` in your code.';
+      const knownFiles = new Map<string, string>([
+        ['help-faq.md', '.kiro/steering/help-faq.md'],
+      ]);
+
+      const result = parserService.parse(file, content, knownFiles);
+      const btRefs = result.references.filter((r) => r.type === 'backtick-ref');
+      assert.strictEqual(btRefs.length, 0);
+    });
+
+    it('does not match names containing dots (file.ts, v2.0)', function () {
+      const file = createMockSteeringFile();
+      const content = 'See `file.ts` and `v2.0` for examples.';
+      const knownFiles = new Map<string, string>([
+        ['file.ts.md', '.kiro/steering/file.ts.md'],
+        ['v2.0.md', '.kiro/steering/v2.0.md'],
+      ]);
+
+      const result = parserService.parse(file, content, knownFiles);
+      const btRefs = result.references.filter((r) => r.type === 'backtick-ref');
+      assert.strictEqual(btRefs.length, 0);
+    });
+
+    it('existing .md backtick ref behavior is unchanged (regression)', function () {
+      const file = createMockSteeringFile();
+      const content = 'Reference `help-faq.md` for common questions.';
+      const knownFiles = new Map<string, string>([
+        ['help-faq.md', '.kiro/steering/help-faq.md'],
+      ]);
+
+      const result = parserService.parse(file, content, knownFiles);
+      const btRefs = result.references.filter((r) => r.type === 'backtick-ref');
+      assert.strictEqual(btRefs.length, 1);
+      assert.strictEqual(btRefs[0].target, '.kiro/steering/help-faq.md');
+    });
+  });
+
   describe('extractFrontMatter() — inclusion quote stripping', function () {
     it('strips double quotes from inclusion value', function () {
       const file = createMockSteeringFile('.kiro/steering/api-patterns.md');
