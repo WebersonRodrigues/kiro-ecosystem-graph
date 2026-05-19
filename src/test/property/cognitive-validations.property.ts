@@ -147,10 +147,11 @@ describe('Cognitive Validations — Hops to Reach (Property)', function () {
 
   it('threshold at 4 hops: nodes at distance < 4 are not flagged', function () {
     // Linear chain: entry → n1 → n2 → n3 (3 hops, should NOT be flagged)
+    // Use skill type for intermediate nodes (not excluded by inclusion check)
     const entry = makeNode('entry.md', { metadata: { inclusion: 'always' } });
-    const n1 = makeNode('n1.md');
-    const n2 = makeNode('n2.md');
-    const n3 = makeNode('n3.md');
+    const n1 = makeNode('n1.md', { type: 'skill' });
+    const n2 = makeNode('n2.md', { type: 'skill' });
+    const n3 = makeNode('n3.md', { type: 'skill' });
 
     const nodes = [entry, n1, n2, n3];
     const edges: GraphEdge[] = [
@@ -165,11 +166,12 @@ describe('Cognitive Validations — Hops to Reach (Property)', function () {
 
   it('threshold at 4 hops: nodes at distance >= 4 ARE flagged', function () {
     // Linear chain: entry → n1 → n2 → n3 → n4 (4 hops)
+    // Use skill type for intermediate/target nodes
     const entry = makeNode('entry.md', { metadata: { inclusion: 'always' } });
-    const n1 = makeNode('n1.md');
-    const n2 = makeNode('n2.md');
-    const n3 = makeNode('n3.md');
-    const n4 = makeNode('n4.md');
+    const n1 = makeNode('n1.md', { type: 'skill' });
+    const n2 = makeNode('n2.md', { type: 'skill' });
+    const n3 = makeNode('n3.md', { type: 'skill' });
+    const n4 = makeNode('n4.md', { type: 'skill' });
 
     const nodes = [entry, n1, n2, n3, n4];
     const edges: GraphEdge[] = [
@@ -185,9 +187,10 @@ describe('Cognitive Validations — Hops to Reach (Property)', function () {
     assert.strictEqual(alerts[0].hops, 4);
   });
 
-  it('unreachable nodes get hops=999', function () {
+  it('unreachable always-loaded nodes get hops=999', function () {
+    // Use skill type for isolated node (steerings with auto are excluded)
     const entry = makeNode('entry.md', { metadata: { inclusion: 'always' } });
-    const isolated = makeNode('isolated.md');
+    const isolated = makeNode('isolated.md', { type: 'skill' });
 
     const nodes = [entry, isolated];
     const edges: GraphEdge[] = [];
@@ -858,20 +861,19 @@ describe('Preservation — Context Overload keeps always/auto steerings (Propert
   });
 });
 
-describe('Preservation — Orphan Steerings keeps always/auto without connections (Property)', function () {
+describe('Preservation — Orphan Steerings excludes auto and keeps always without connections (Property)', function () {
   this.timeout(30000);
 
   /**
    * **Validates: Requirements 3.2**
    *
-   * For any steering with inclusion always or auto and 0 connections,
+   * For any steering with inclusion 'always' and 0 connections,
    * computeOrphanSteerings MUST include it in the result.
+   * Steerings with 'auto' inclusion have independent access and are excluded.
    */
-  it('steerings with always/auto inclusion and 0 edges ARE orphans', function () {
-    const inclusionArb = fc.constantFrom('always', 'auto');
-
+  it('steerings with always inclusion and 0 edges ARE orphans', function () {
     fc.assert(
-      fc.property(inclusionArb, (inclusion) => {
+      fc.property(fc.constant('always'), (inclusion) => {
         const node = makeNode('orphan-always.md', {
           type: 'steering-domain',
           metadata: { inclusion },
@@ -884,13 +886,22 @@ describe('Preservation — Orphan Steerings keeps always/auto without connection
     );
   });
 
-  it('steerings without inclusion (default always) and 0 edges ARE orphans', function () {
+  it('steerings with auto inclusion and 0 edges are NOT orphans', function () {
+    const node = makeNode('auto-steering.md', {
+      type: 'steering-domain',
+      metadata: { inclusion: 'auto' },
+    });
+    const result = computeOrphanSteerings([node], []);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('steerings without inclusion (defaults to auto) and 0 edges are NOT orphans', function () {
     const node = makeNode('no-inclusion.md', {
       type: 'steering-tech',
       metadata: {},
     });
     const result = computeOrphanSteerings([node], []);
-    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result.length, 0);
   });
 });
 

@@ -205,6 +205,12 @@ export function computeHopsToReach(
     // Skip entry points themselves
     if (entryPoints.some((e) => e.id === node.id)) { continue; }
 
+    // Skip steerings with independent access mechanisms
+    if (node.type && node.type.startsWith('steering-')) {
+      const inclusion = (node.metadata && node.metadata.inclusion) || 'auto';
+      if (inclusion === 'auto' || inclusion === 'fileMatch' || inclusion === 'manual') { continue; }
+    }
+
     const dist = distances.get(node.id);
     if (dist === undefined) {
       alerts.push({ id: node.id, label: node.label, hops: 999 });
@@ -601,8 +607,8 @@ export function computeContextOverload(
 
 /**
  * Computes orphan steerings: steerings with 0 incoming + 0 outgoing edges.
- * Excludes steerings with inclusion 'fileMatch' or 'manual' since they
- * function independently of cross-references.
+ * Excludes steerings with inclusion 'fileMatch', 'manual', or 'auto' since
+ * they have independent access mechanisms and don't need cross-references.
  *
  * @param nodes - All graph nodes
  * @param edges - All graph edges
@@ -625,8 +631,8 @@ export function computeOrphanSteerings(
     if (!n.type || !n.type.startsWith('steering-')) { continue; }
     if (n.source && n.source !== 'local' && n.resolved !== false) { continue; }
     const inclusion = (n.metadata && n.metadata.inclusion) || 'auto';
-    // SKIP fileMatch/manual — don't need cross-references
-    if (inclusion === 'fileMatch' || inclusion === 'manual') { continue; }
+    // SKIP fileMatch/manual/auto — have independent access mechanisms
+    if (inclusion === 'fileMatch' || inclusion === 'manual' || inclusion === 'auto') { continue; }
     if ((incomingMap[n.id] || 0) === 0 && (outgoingMap[n.id] || 0) === 0) {
       orphans.push({ id: n.id, label: n.label });
     }
@@ -687,8 +693,8 @@ const IMPERATIVE_VERBS = /\b(analise|verifique|garanta|implemente|crie|remova|ad
  *
  * Criteria:
  * - Content is not null/empty
- * - Contains >= 20 words
- * - Contains at least one imperative verb (PT-BR or EN)
+ * - Contains >= 50 words (long prompts are inherently self-sufficient), OR
+ * - Contains >= 20 words AND at least one imperative verb (PT-BR or EN)
  *
  * @param content - The prompt content to evaluate
  * @returns true if the prompt is self-sufficient
@@ -696,6 +702,7 @@ const IMPERATIVE_VERBS = /\b(analise|verifique|garanta|implemente|crie|remova|ad
 export function isPromptSelfSufficient(content: string | undefined | null): boolean {
   if (!content) { return false; }
   const words = content.trim().split(/\s+/);
+  if (words.length >= 50) { return true; }
   if (words.length < 20) { return false; }
   return IMPERATIVE_VERBS.test(content);
 }

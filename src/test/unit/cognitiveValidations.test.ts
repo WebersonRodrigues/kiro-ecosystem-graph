@@ -19,6 +19,9 @@ import {
   INLINE_RISK_KEYWORDS,
   hasInlineRiskCriteria,
   computeDmlProtectionLevel,
+  computeHopsToReach,
+  isPromptSelfSufficient,
+  computeOrphanSteerings,
 } from '../../services/cognitiveValidations';
 import type { GraphNode, GraphEdge, NodeType } from '../../types';
 
@@ -2600,6 +2603,169 @@ describe('CognitiveValidations — detectPassiveKnowledge() domain threshold', f
       makeNode('domain-rules.md', { type: 'steering-domain', metadata: {} }),
     ];
     const result = detectPassiveKnowledge(nodes);
+    assert.strictEqual(result.length, 0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('CognitiveValidations — computeHopsToReach() inclusion exclusion', function () {
+  it('auto steering is NOT in hops alerts even when unreachable', function () {
+    const nodes: GraphNode[] = [
+      makeNode('entry.md', { metadata: { inclusion: 'always' } }),
+      makeNode('auto-steering.md', { metadata: { inclusion: 'auto' } }),
+    ];
+    const edges: GraphEdge[] = [];
+    const result = computeHopsToReach(nodes, edges);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('fileMatch steering is NOT in hops alerts even when unreachable', function () {
+    const nodes: GraphNode[] = [
+      makeNode('entry.md', { metadata: { inclusion: 'always' } }),
+      makeNode('filematch.md', { metadata: { inclusion: 'fileMatch' } }),
+    ];
+    const edges: GraphEdge[] = [];
+    const result = computeHopsToReach(nodes, edges);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('manual steering is NOT in hops alerts even when unreachable', function () {
+    const nodes: GraphNode[] = [
+      makeNode('entry.md', { metadata: { inclusion: 'always' } }),
+      makeNode('manual.md', { metadata: { inclusion: 'manual' } }),
+    ];
+    const edges: GraphEdge[] = [];
+    const result = computeHopsToReach(nodes, edges);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('steering without metadata (defaults to auto) is NOT in hops alerts', function () {
+    const nodes: GraphNode[] = [
+      makeNode('entry.md', { metadata: { inclusion: 'always' } }),
+      makeNode('no-meta.md', { metadata: undefined }),
+    ];
+    const edges: GraphEdge[] = [];
+    const result = computeHopsToReach(nodes, edges);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('non-steering node far from entry IS still flagged', function () {
+    const nodes: GraphNode[] = [
+      makeNode('entry.md', { type: 'hook-auto' }),
+      makeNode('a.md', { type: 'skill' }),
+      makeNode('b.md', { type: 'skill' }),
+      makeNode('c.md', { type: 'skill' }),
+      makeNode('d.md', { type: 'skill' }),
+      makeNode('far.md', { type: 'skill' }),
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'entry.md', target: 'a.md', type: 'backtick-ref' },
+      { source: 'a.md', target: 'b.md', type: 'backtick-ref' },
+      { source: 'b.md', target: 'c.md', type: 'backtick-ref' },
+      { source: 'c.md', target: 'd.md', type: 'backtick-ref' },
+      { source: 'd.md', target: 'far.md', type: 'backtick-ref' },
+    ];
+    const result = computeHopsToReach(nodes, edges, 4);
+    const farAlert = result.find((a) => a.id === 'far.md');
+    assert.ok(farAlert, 'far.md should be flagged at 5 hops');
+    assert.strictEqual(farAlert!.hops, 5);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('CognitiveValidations — isPromptSelfSufficient() 50-word threshold', function () {
+  it('returns true for 50+ words even without imperative verbs', function () {
+    const longText = Array(55).fill('word').join(' ');
+    assert.strictEqual(isPromptSelfSufficient(longText), true);
+  });
+
+  it('returns false for 19 words even with imperative verb', function () {
+    const shortText = 'ensure ' + Array(18).fill('word').join(' ');
+    assert.strictEqual(isPromptSelfSufficient(shortText), false);
+  });
+
+  it('returns true for 20 words with imperative verb', function () {
+    const text = 'ensure ' + Array(19).fill('word').join(' ');
+    assert.strictEqual(isPromptSelfSufficient(text), true);
+  });
+
+  it('returns false for 25 words without imperative verb', function () {
+    const text = Array(25).fill('word').join(' ');
+    assert.strictEqual(isPromptSelfSufficient(text), false);
+  });
+
+  it('returns true for exactly 50 words without imperative verb', function () {
+    const text = Array(50).fill('context').join(' ');
+    assert.strictEqual(isPromptSelfSufficient(text), true);
+  });
+
+  it('returns false for null/undefined/empty', function () {
+    assert.strictEqual(isPromptSelfSufficient(null), false);
+    assert.strictEqual(isPromptSelfSufficient(undefined), false);
+    assert.strictEqual(isPromptSelfSufficient(''), false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('CognitiveValidations — computeOrphanSteerings() auto exclusion', function () {
+  it('auto steering with 0 edges is NOT flagged as orphan', function () {
+    const nodes: GraphNode[] = [
+      makeNode('auto.md', { metadata: { inclusion: 'auto' } }),
+    ];
+    const edges: GraphEdge[] = [];
+    const result = computeOrphanSteerings(nodes, edges);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('steering without metadata (defaults to auto) is NOT flagged', function () {
+    const nodes: GraphNode[] = [
+      makeNode('no-meta.md', { metadata: undefined }),
+    ];
+    const edges: GraphEdge[] = [];
+    const result = computeOrphanSteerings(nodes, edges);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('fileMatch steering with 0 edges is NOT flagged', function () {
+    const nodes: GraphNode[] = [
+      makeNode('fm.md', { metadata: { inclusion: 'fileMatch' } }),
+    ];
+    const edges: GraphEdge[] = [];
+    const result = computeOrphanSteerings(nodes, edges);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('manual steering with 0 edges is NOT flagged', function () {
+    const nodes: GraphNode[] = [
+      makeNode('man.md', { metadata: { inclusion: 'manual' } }),
+    ];
+    const edges: GraphEdge[] = [];
+    const result = computeOrphanSteerings(nodes, edges);
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('always steering with 0 edges IS flagged as orphan', function () {
+    const nodes: GraphNode[] = [
+      makeNode('always.md', { metadata: { inclusion: 'always' } }),
+    ];
+    const edges: GraphEdge[] = [];
+    const result = computeOrphanSteerings(nodes, edges);
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].id, 'always.md');
+  });
+
+  it('always steering with edges is NOT flagged', function () {
+    const nodes: GraphNode[] = [
+      makeNode('always.md', { metadata: { inclusion: 'always' } }),
+      makeNode('other.md', { metadata: { inclusion: 'always' } }),
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'always.md', target: 'other.md', type: 'backtick-ref' },
+    ];
+    const result = computeOrphanSteerings(nodes, edges);
     assert.strictEqual(result.length, 0);
   });
 });

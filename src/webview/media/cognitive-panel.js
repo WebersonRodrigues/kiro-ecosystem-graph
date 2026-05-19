@@ -272,9 +272,12 @@ var CognitivePanel = (function () {
     }
 
     // Filter steerings with distance >= 4
+    // Skip steerings with independent access mechanisms (auto/fileMatch/manual)
     var alerts = [];
     nodes.forEach(function(n) {
       if (n.type && n.type.indexOf('steering-') === 0) {
+        var inclusion = (n.metadata && n.metadata.inclusion) || 'auto';
+        if (inclusion === 'auto' || inclusion === 'fileMatch' || inclusion === 'manual') { return; }
         var hops = distance[n.id];
         if (hops === undefined || hops >= 4) {
           alerts.push({
@@ -1136,6 +1139,7 @@ var CognitivePanel = (function () {
   function isPromptSelfSufficient(content) {
     if (!content) { return false; }
     var words = content.trim().split(/\s+/);
+    if (words.length >= 50) { return true; }
     if (words.length < 20) { return false; }
     var imperativePattern = /\b(analise|verifique|garanta|implemente|crie|remova|adicione|corrija|valide|reporte|documente|teste|refatore|otimize|configure|monitore|ensure|verify|check|validate|create|remove|add|fix|report|document|test|refactor|optimize|configure|monitor|analyze|review|implement|always|never|must|shall|should)\b/i;
     return imperativePattern.test(content);
@@ -1690,8 +1694,8 @@ var CognitivePanel = (function () {
         // Skip external/global resolved nodes
         if (n.source && n.source !== 'local' && n.resolved !== false) { return; }
         var inclusion = (n.metadata && n.metadata.inclusion) || 'auto';
-        // Exclude fileMatch/manual — don't need cross-references
-        if (inclusion === 'fileMatch' || inclusion === 'manual') { return; }
+        // Exclude fileMatch/manual/auto — have independent access mechanisms
+        if (inclusion === 'fileMatch' || inclusion === 'manual' || inclusion === 'auto') { return; }
         if ((incomingMap[n.id] || 0) === 0 && (outgoingMap[n.id] || 0) === 0) {
           steeringsSoltos.push({ id: n.id, label: n.label });
         }
